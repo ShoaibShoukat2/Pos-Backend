@@ -126,10 +126,12 @@ CORS_ALLOWED_ORIGINS = [
     if origin.strip()
 ]
 CORS_ALLOWED_ORIGIN_REGEXES = [
-    r"^http://localhost:\d+$",
-    r"^http://127\.0\.0\.1:\d+$",
-    r"^http://192\.168\.\d{1,3}\.\d{1,3}:\d+$",
-    r"^http://10\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d+$",
+    r"^https?://localhost:\d+$",
+    r"^https?://127\.0\.0\.1:\d+$",
+    r"^https?://192\.168\.\d{1,3}\.\d{1,3}(:\d+)?$",
+    r"^https?://10\.\d{1,3}\.\d{1,3}\.\d{1,3}(:\d+)?$",
+    r"^https?://.*\.pythonanywhere\.com$",
+    r"^https?://.*\.vercel\.app$",
 ]
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_HEADERS = [
