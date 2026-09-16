@@ -7,7 +7,12 @@ from apps.finance.models import PaymentMethod
 
 class SaleStatus(models.TextChoices):
     COMPLETED = "completed", "Completed"
+    PARTIAL = "partial", "Partial return"
+    RETURNED = "returned", "Returned"
     VOID = "void", "Void"
+
+
+OPEN_SALE_STATUSES = (SaleStatus.COMPLETED, SaleStatus.PARTIAL)
 
 
 class Sale(TimeStampedModel):
@@ -36,6 +41,10 @@ class Sale(TimeStampedModel):
     total = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     paid_amount = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     due_amount = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    returned_total = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    refunded_amount = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    net_total = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    loyalty_returned = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     coupon = models.ForeignKey(
         "promotions.Coupon",
         on_delete=models.SET_NULL,
@@ -86,6 +95,8 @@ class SaleLine(TimeStampedModel):
         related_name="pos_sale_lines",
     )
     quantity = models.DecimalField(max_digits=14, decimal_places=3)
+    returned_qty = models.DecimalField(max_digits=14, decimal_places=3, default=0)
+    returned_amount = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     free_qty = models.DecimalField(max_digits=14, decimal_places=3, default=0)
     unit_price = models.DecimalField(max_digits=14, decimal_places=2)
     promo_price = models.DecimalField(max_digits=14, decimal_places=2)
@@ -109,6 +120,64 @@ class SalePayment(TimeStampedModel):
     amount = models.DecimalField(max_digits=14, decimal_places=2)
 
     objects = BusinessScopedManager()
+
+
+class SaleReturn(TimeStampedModel):
+    business = models.ForeignKey(
+        "businesses.Business",
+        on_delete=models.CASCADE,
+        related_name="pos_sale_returns",
+    )
+    branch = models.ForeignKey(
+        "businesses.Branch",
+        on_delete=models.PROTECT,
+        related_name="pos_sale_returns",
+    )
+    sale = models.ForeignKey(Sale, on_delete=models.CASCADE, related_name="returns")
+    number = models.CharField(max_length=30)
+    refund_amount = models.DecimalField(max_digits=14, decimal_places=2)
+    credit_reduced = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    cash_refunded = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    refund_method = models.CharField(max_length=12, choices=PaymentMethod.choices, default=PaymentMethod.CASH)
+    reason = models.CharField(max_length=255, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="pos_sale_returns",
+    )
+
+    objects = BusinessScopedManager()
+
+    class Meta:
+        unique_together = ("business", "number")
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return self.number
+
+
+class SaleReturnLine(TimeStampedModel):
+    business = models.ForeignKey(
+        "businesses.Business",
+        on_delete=models.CASCADE,
+        related_name="pos_sale_return_lines",
+    )
+    sale_return = models.ForeignKey(SaleReturn, on_delete=models.CASCADE, related_name="lines")
+    sale_line = models.ForeignKey(SaleLine, on_delete=models.PROTECT, related_name="return_lines")
+    variant = models.ForeignKey(
+        "catalog.ProductVariant",
+        on_delete=models.PROTECT,
+        related_name="pos_sale_return_lines",
+    )
+    quantity = models.DecimalField(max_digits=14, decimal_places=3)
+    amount = models.DecimalField(max_digits=14, decimal_places=2)
+
+    objects = BusinessScopedManager()
+
+    class Meta:
+        ordering = ["created_at"]
 
 
 class ScannerSession(TimeStampedModel):

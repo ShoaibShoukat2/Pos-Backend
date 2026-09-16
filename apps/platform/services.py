@@ -9,7 +9,7 @@ from apps.accounts.models import User
 from apps.businesses.models import Branch, Business
 from apps.catalog.models import Product
 from apps.customers.models import Customer
-from apps.pos.models import Sale, SaleStatus
+from apps.pos.models import OPEN_SALE_STATUSES, Sale
 
 MONEY = DecimalField(max_digits=18, decimal_places=2)
 
@@ -34,7 +34,7 @@ def platform_overview(period: str = "month"):
     trend_start = timezone.now() - timedelta(days=13)
     businesses = Business.objects.all()
     users = User.objects.filter(is_platform_admin=False)
-    sales = Sale.objects.filter(status=SaleStatus.COMPLETED)
+    sales = Sale.objects.filter(status__in=OPEN_SALE_STATUSES)
     period_sales = sales.filter(created_at__gte=start)
 
     trend = (
@@ -105,7 +105,7 @@ def annotated_businesses():
         customer_count=Count("customers", distinct=True),
         sale_count=Count(
             "pos_sales",
-            filter=Q(pos_sales__status=SaleStatus.COMPLETED),
+            filter=Q(pos_sales__status__in=OPEN_SALE_STATUSES),
             distinct=True,
         ),
         owner_email=MaxOwnerEmail(),

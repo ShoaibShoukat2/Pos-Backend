@@ -8,7 +8,7 @@ from django.utils import timezone
 from apps.customers.models import Customer, CustomerSale
 from apps.finance.models import Expense
 from apps.inventory.models import MovementType, StockLevel, StockMovement
-from apps.pos.models import Sale, SaleLine, SaleStatus
+from apps.pos.models import OPEN_SALE_STATUSES, Sale, SaleLine
 from apps.purchases.models import SupplierPayable
 
 ZERO = Decimal("0")
@@ -32,7 +32,7 @@ def _pos_sales(business, start, end, branch_ids=None):
     return _scope(
         Sale.objects.filter(
             business=business,
-            status=SaleStatus.COMPLETED,
+            status__in=OPEN_SALE_STATUSES,
             created_at__gte=start,
             created_at__lte=end,
         ),
@@ -56,7 +56,7 @@ def _sale_movements(business, start, end, branch_ids=None):
     return _scope(
         StockMovement.objects.filter(
             business=business,
-            movement_type=MovementType.SALE,
+            movement_type__in=[MovementType.SALE, MovementType.SALE_RETURN],
             created_at__gte=start,
             created_at__lte=end,
         ).select_related("variant__product__category"),
@@ -65,19 +65,22 @@ def _sale_movements(business, start, end, branch_ids=None):
 
 
 def cogs_for(business, start, end, branch_ids=None) -> Decimal:
-    return (
+    sold = ZERO
+    returned = ZERO
+    for row in (
         _sale_movements(business, start, end, branch_ids)
-        .aggregate(
-            total=Sum(
-                ExpressionWrapper(Abs(F("quantity")) * F("variant__cost_price"), output_field=MONEY)
-            )
-        )["total"]
-        or ZERO
-    )
+        .values("movement_type")
+        .annotate(total=Sum(ExpressionWrapper(Abs(F("quantity")) * F("variant__cost_price"), output_field=MONEY)))
+    ):
+        if row["movement_type"] == MovementType.SALE_RETURN:
+            returned += row["total"] or ZERO
+        else:
+            sold += row["total"] or ZERO
+    return sold - returned
 
 
 def revenue_for(business, start, end, branch_ids=None) -> Decimal:
-    pos = _pos_sales(business, start, end, branch_ids).aggregate(total=Sum("total"))["total"] or ZERO
+    pos = _pos_sales(business, start, end, branch_ids).aggregate(total=Sum("net_total"))["total"] or ZERO
     legacy = _legacy_sales(business, start, end, branch_ids).aggregate(total=Sum("total"))["total"] or ZERO
     return pos + legacy
 
@@ -101,11 +104,12 @@ def _trunc(kind):
     return TruncMonth("created_at", tzinfo=tz)
 
 
-def _series_from_qs(querysets, kind):
+def _series_from_qs(querysets, kind, amount_field="total"):
     buckets = defaultdict(lambda: {"total": ZERO, "orders": 0})
     trunc = _trunc(kind)
     for qs in querysets:
-        for row in qs.annotate(bucket=trunc).values("bucket").annotate(total=Sum("total"), orders=Count("id")):
+        field = "net_total" if getattr(qs.model, "__name__", "") == "Sale" else amount_field
+        for row in qs.annotate(bucket=trunc).values("bucket").annotate(total=Sum(field), orders=Count("id")):
             if not row["bucket"]:
                 continue
             key = row["bucket"].date() if hasattr(row["bucket"], "date") else row["bucket"]
@@ -118,7 +122,7 @@ def _series_from_qs(querysets, kind):
 
 
 def _order_stats(business, start, end, branch_ids=None):
-    pos = _pos_sales(business, start, end, branch_ids).aggregate(total=Sum("total"), orders=Count("id"))
+    pos = _pos_sales(business, start, end, branch_ids).aggregate(total=Sum("net_total"), orders=Count("id"))
     legacy = _legacy_sales(business, start, end, branch_ids).aggregate(total=Sum("total"), orders=Count("id"))
     return (pos["total"] or ZERO) + (legacy["total"] or ZERO), (pos["orders"] or 0) + (legacy["orders"] or 0)
 
@@ -169,7 +173,7 @@ def sales_report(business, start, end, period: str, branch_ids=None) -> dict:
     cashiers = defaultdict(lambda: {"name": "Unassigned", "total": ZERO, "orders": 0})
     cashier_rows = list(
         pos_qs.values("created_by_id", "created_by__first_name", "created_by__last_name").annotate(
-            total=Sum("total"), orders=Count("id")
+            total=Sum("net_total"), orders=Count("id")
         )
     ) + list(
         legacy_qs.values("created_by_id", "created_by__first_name", "created_by__last_name").annotate(
@@ -189,7 +193,7 @@ def sales_report(business, start, end, period: str, branch_ids=None) -> dict:
     line_rows = (
         SaleLine.objects.filter(sale__in=pos_qs)
         .values("variant__product_id", "variant__product__name", "variant__product__category__name")
-        .annotate(qty=Sum("quantity"), revenue=Sum("line_total"))
+        .annotate(qty=Sum(F("quantity") - F("returned_qty")), revenue=Sum(F("line_total") - F("returned_amount")))
         .order_by("-revenue")[:REPORT_ROW_CAP]
     )
     for row in line_rows:
@@ -415,7 +419,7 @@ def live_board(business, branch_ids=None) -> dict:
 
     sale_lines = (
         _scope(
-            SaleLine.objects.filter(business=business, sale__status=SaleStatus.COMPLETED),
+            SaleLine.objects.filter(business=business, sale__status__in=OPEN_SALE_STATUSES),
             branch_ids,
             field="sale__branch_id",
         )
@@ -632,14 +636,14 @@ def owner_overview(business, start, end, period: str, branch_ids=None) -> dict:
         .order_by("-created_at")[:8]
     )
     recent_sales = list(
-        _scope(Sale.objects.filter(business=business, status=SaleStatus.COMPLETED), branch_ids)
+        _scope(Sale.objects.filter(business=business, status__in=OPEN_SALE_STATUSES), branch_ids)
         .select_related("customer", "branch", "created_by")
         .order_by("-created_at")[:8]
     )
     top_products = (
         SaleLine.objects.filter(sale__in=_pos_sales(business, start, end, branch_ids))
         .values("variant__product__name")
-        .annotate(qty=Sum("quantity"), revenue=Sum("line_total"))
+        .annotate(qty=Sum(F("quantity") - F("returned_qty")), revenue=Sum(F("line_total") - F("returned_amount")))
         .order_by("-revenue")[:6]
     )
     daily = _series_from_qs(
@@ -707,7 +711,7 @@ def owner_overview(business, start, end, period: str, branch_ids=None) -> dict:
             {
                 "id": str(sale.id),
                 "number": sale.number,
-                "total": money(sale.total),
+                "total": money(sale.net_total),
                 "customer_name": sale.customer.name if sale.customer_id else "Walk-in",
                 "branch_name": sale.branch.name,
                 "cashier_name": sale.created_by.full_name if sale.created_by_id else "—",

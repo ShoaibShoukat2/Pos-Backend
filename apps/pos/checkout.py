@@ -142,6 +142,7 @@ def checkout_sale(*, business, user, payload: dict) -> Sale:
         total=total,
         paid_amount=paid,
         due_amount=due,
+        net_total=total,
         coupon=coupon,
         coupon_code=coupon.code if coupon else "",
         manual_discount_kind=manual_kind,

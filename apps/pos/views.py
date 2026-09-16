@@ -7,7 +7,7 @@ from rest_framework.views import APIView
 from apps.businesses.serializers import BranchSerializer
 from apps.catalog.models import ProductVariant
 from apps.accounts.helpers import is_cashier_user
-from apps.core.branch import accessible_branches, resolve_branch
+from apps.core.branch import accessible_branches, apply_branch_scope, resolve_branch
 from apps.core.mixins import BusinessQuerysetMixin
 from apps.core.pagination import StandardPagination
 from apps.core.permissions import HasAnyPermission, HasPermission
@@ -16,8 +16,8 @@ from apps.customers.serializers import CustomerSerializer
 from apps.finance.models import CashSession
 from apps.finance.serializers import CashSessionSerializer
 from apps.inventory.models import StockLevel
-from apps.pos.models import Sale
-from apps.pos.serializers import CheckoutSerializer, SaleSerializer, SyncSerializer
+from apps.pos.models import Sale, SaleReturn
+from apps.pos.serializers import CheckoutSerializer, ReturnSerializer, SaleReturnSerializer, SaleSerializer, SyncSerializer
 from apps.promotions.engine import active_promotions, loyalty_settings, tier_for
 from apps.promotions.models import Coupon, MembershipTier
 from apps.promotions.serializers import CouponSerializer, LoyaltySettingsSerializer, MembershipTierSerializer, PromotionSerializer
@@ -81,6 +81,51 @@ class SaleViewSet(BusinessQuerysetMixin, mixins.ListModelMixin, mixins.RetrieveM
         if is_cashier_user(user) and not user.is_owner:
             qs = qs.filter(created_by=user)
         return qs
+
+
+class ReturnLookupView(APIView):
+    permission_classes = [IsAuthenticated, HasAnyPermission]
+    required_any_permissions = ("return.sale", "sale.create")
+
+    def get(self, request):
+        q = (request.query_params.get("q") or request.query_params.get("search") or request.query_params.get("number") or "").strip()
+        if not q:
+            return Response({"detail": "Enter a ticket number."}, status=400)
+        qs = apply_branch_scope(
+            Sale.objects.filter(business=request.user.business)
+            .select_related("customer", "branch", "created_by")
+            .prefetch_related("lines__variant__product", "payments"),
+            request,
+        )
+        sale = qs.filter(number__iexact=q).first()
+        if not sale:
+            sale = qs.filter(number__icontains=q).order_by("-created_at").first()
+        if not sale:
+            return Response({"detail": "Ticket not found."}, status=404)
+        return Response(SaleSerializer(sale).data)
+
+
+class ReturnView(APIView):
+    permission_classes = [IsAuthenticated, HasAnyPermission]
+    required_any_permissions = ("return.sale", "sale.create")
+
+    def get(self, request):
+        qs = apply_branch_scope(
+            SaleReturn.objects.filter(business=request.user.business)
+            .select_related("sale", "sale__customer", "branch", "created_by")
+            .prefetch_related("lines__variant__product", "sale__lines__variant__product", "sale__payments")
+            .order_by("-created_at"),
+            request,
+        )
+        paginator = StandardPagination()
+        page = paginator.paginate_queryset(qs, request)
+        return paginator.get_paginated_response(SaleReturnSerializer(page, many=True).data)
+
+    def post(self, request):
+        ser = ReturnSerializer(data=request.data, context={"request": request})
+        ser.is_valid(raise_exception=True)
+        row = ser.save()
+        return Response(SaleReturnSerializer(row).data, status=201)
 
 
 class CheckoutView(APIView):

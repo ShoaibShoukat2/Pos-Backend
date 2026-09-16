@@ -102,11 +102,11 @@ class CashierOverviewView(generics.GenericAPIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        from django.db.models import Count, Sum
+        from django.db.models import Count, F, Sum
         from django.utils import timezone
 
         from apps.finance.models import CashSession
-        from apps.pos.models import Sale, SaleLine, SaleStatus
+        from apps.pos.models import OPEN_SALE_STATUSES, Sale, SaleLine
         from apps.reports.services import money
 
         user = request.user
@@ -116,7 +116,7 @@ class CashierOverviewView(generics.GenericAPIView):
         sales = Sale.objects.filter(
             business=user.business,
             created_by=user,
-            status=SaleStatus.COMPLETED,
+            status__in=OPEN_SALE_STATUSES,
             created_at__gte=start,
         )
         if user.default_branch_id:
@@ -143,10 +143,10 @@ class CashierOverviewView(generics.GenericAPIView):
         sold = list(
             SaleLine.objects.filter(sale__in=sales)
             .values("variant__product__name", "variant__sku")
-            .annotate(qty=Sum("quantity"), revenue=Sum("line_total"), tickets=Count("sale", distinct=True))
+            .annotate(qty=Sum(F("quantity") - F("returned_qty")), revenue=Sum(F("line_total") - F("returned_amount")), tickets=Count("sale", distinct=True))
             .order_by("-qty")[:10]
         )
-        totals = sales.aggregate(total=Sum("total"), orders=Count("id"))
+        totals = sales.aggregate(total=Sum("net_total"), orders=Count("id"))
         return Response(
             {
                 "cashier_name": user.full_name,
@@ -179,7 +179,8 @@ class CashierOverviewView(generics.GenericAPIView):
                     {
                         "id": str(sale.id),
                         "number": sale.number,
-                        "total": money(sale.total),
+                        "total": money(sale.net_total),
+                        "status": sale.status,
                         "customer_name": sale.customer.name if sale.customer_id else "Walk-in",
                         "branch_name": sale.branch.name,
                         "payment_method": sale.payment_method,
