@@ -112,11 +112,10 @@ def checkout_sale(*, business, user, payload: dict) -> Sale:
     total = money(max(ZERO, subtotal - discount_total))
 
     payments = payload.get("payments") or []
-    paid = money(sum((Decimal(p.get("amount") or 0) for p in payments), ZERO))
-    if paid < ZERO:
+    tendered = money(sum((Decimal(p.get("amount") or 0) for p in payments), ZERO))
+    if tendered < ZERO:
         raise ValidationError({"payments": "Payment cannot be negative."})
-    if paid > total:
-        raise ValidationError({"payments": "Paid amount cannot exceed the total."})
+    paid = money(min(tendered, total))
     due = money(total - paid)
     if due > ZERO and not customer:
         raise ValidationError({"customer": "A customer is required for credit."})
@@ -178,14 +177,17 @@ def checkout_sale(*, business, user, payload: dict) -> Sale:
             )
 
     cash_paid = ZERO
+    remaining = paid
     for pay in payments:
         amount = money(pay.get("amount") or 0)
-        if amount <= ZERO:
+        if amount <= ZERO or remaining <= ZERO:
             continue
+        applied = min(amount, remaining)
         method = pay.get("method") or PaymentMethod.CASH
-        SalePayment.objects.create(business=business, sale=sale, method=method, amount=amount)
+        SalePayment.objects.create(business=business, sale=sale, method=method, amount=applied)
+        remaining = money(remaining - applied)
         if method == PaymentMethod.CASH:
-            cash_paid += amount
+            cash_paid = money(cash_paid + applied)
 
     if cash_paid > ZERO:
         session = require_open_session(branch)

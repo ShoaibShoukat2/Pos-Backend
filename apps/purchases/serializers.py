@@ -1,5 +1,8 @@
+from decimal import Decimal
+
 from rest_framework import serializers
 
+from apps.promotions.engine import money
 from apps.purchases.models import (
     GoodsReceipt,
     GoodsReceiptLine,
@@ -89,7 +92,7 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
         annotated = getattr(obj, "annotated_total", None)
         if annotated is not None:
             return annotated
-        return sum((line.quantity * line.unit_cost for line in obj.lines.all()), start=0)
+        return sum((money(line.quantity * line.unit_cost) for line in obj.lines.all()), start=Decimal("0"))
 
     def create(self, validated):
         request = self.context["request"]
@@ -199,7 +202,7 @@ class GoodsReceiptSerializer(serializers.ModelSerializer):
         )
 
     def get_total_amount(self, obj):
-        return sum((line.quantity * line.unit_cost for line in obj.lines.all()), start=0)
+        return sum((money(line.quantity * line.unit_cost) for line in obj.lines.all()), start=Decimal("0"))
 
 
 class SupplierPayableSerializer(serializers.ModelSerializer):

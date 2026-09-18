@@ -1,4 +1,4 @@
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
 from django.db import transaction
 from rest_framework.exceptions import ValidationError
@@ -8,11 +8,16 @@ from apps.finance.cash import apply_cash, require_open_session
 from apps.finance.models import CashKind, Expense, PaymentMethod
 
 ZERO = Decimal("0")
+TWOPLACES = Decimal("0.01")
+
+
+def money(value) -> Decimal:
+    return Decimal(value or 0).quantize(TWOPLACES, rounding=ROUND_HALF_UP)
 
 
 @transaction.atomic
 def post_expense(*, business, user, category, branch, amount, method="cash", notes=""):
-    amount = Decimal(amount)
+    amount = money(amount)
     if amount <= ZERO:
         raise ValidationError("Expense amount must be greater than zero.")
     session = None

@@ -1,3 +1,5 @@
+from decimal import Decimal, ROUND_HALF_UP
+
 from django.conf import settings
 from django.db import models
 from django.db.models import F, Sum, Value
@@ -100,7 +102,7 @@ class PurchaseOrderLine(TimeStampedModel):
 
     @property
     def line_total(self):
-        return self.quantity * self.unit_cost
+        return (self.quantity * self.unit_cost).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
 class GoodsReceipt(TimeStampedModel):

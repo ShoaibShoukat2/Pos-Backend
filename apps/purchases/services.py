@@ -1,4 +1,4 @@
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
 from django.db import transaction
 from django.utils import timezone
@@ -21,6 +21,11 @@ from apps.purchases.models import (
 )
 
 ZERO = Decimal("0")
+TWOPLACES = Decimal("0.01")
+
+
+def money(value) -> Decimal:
+    return Decimal(value or 0).quantize(TWOPLACES, rounding=ROUND_HALF_UP)
 
 
 @transaction.atomic
@@ -42,7 +47,7 @@ def create_purchase_order(*, business, user, supplier, branch, notes="", expecte
             order=order,
             variant=row["variant"],
             quantity=row["quantity"],
-            unit_cost=row["unit_cost"],
+            unit_cost=money(row["unit_cost"]),
         )
     return order
 
@@ -90,11 +95,11 @@ def receive_goods(*, business, user, supplier, branch, purchase_order=None, note
         status=GoodsReceipt.Status.POSTED,
         posted_at=timezone.now(),
     )
-    total = Decimal("0")
+    total = ZERO
     for row in lines:
         variant = row["variant"]
         qty = Decimal(row["quantity"])
-        cost = Decimal(row["unit_cost"])
+        cost = money(row["unit_cost"])
         if qty <= 0:
             raise ValidationError("Received quantity must be greater than zero.")
         po_line = row.get("purchase_order_line")
@@ -124,18 +129,18 @@ def receive_goods(*, business, user, supplier, branch, purchase_order=None, note
             reference_id=receipt.id,
             idempotency_key=f"grn:{receipt.id}:{line.id}",
         )
-        total += qty * cost
+        total += money(qty * cost)
 
     SupplierPayable.objects.create(
         business=business,
         supplier=supplier,
         goods_receipt=receipt,
-        amount=total,
+        amount=money(total),
     )
     apply_supplier_ledger(
         supplier=supplier,
         entry_type=SupplierLedgerType.PURCHASE,
-        amount=total,
+        amount=money(total),
         user=user,
         reason=f"Goods received {receipt.number}",
         reference_type="goods_receipt",
@@ -148,7 +153,7 @@ def receive_goods(*, business, user, supplier, branch, purchase_order=None, note
 
 @transaction.atomic
 def pay_supplier(*, business, user, supplier, branch, amount, method="cash", notes=""):
-    amount = Decimal(amount)
+    amount = money(amount)
     if amount <= ZERO:
         raise ValidationError("Payment must be greater than zero.")
     open_payables = list(
@@ -157,7 +162,7 @@ def pay_supplier(*, business, user, supplier, branch, amount, method="cash", not
         .exclude(status=SupplierPayable.Status.PAID)
         .order_by("created_at")
     )
-    outstanding = sum((p.amount - p.paid_amount for p in open_payables), Decimal("0"))
+    outstanding = money(sum((p.amount - p.paid_amount for p in open_payables), ZERO))
     if amount > outstanding:
         raise ValidationError(f"Only Rs {outstanding} is payable to {supplier.name}.")
 
