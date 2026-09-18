@@ -76,7 +76,21 @@ def cogs_for(business, start, end, branch_ids=None) -> Decimal:
             returned += row["total"] or ZERO
         else:
             sold += row["total"] or ZERO
-    return sold - returned
+    services = (
+        SaleLine.objects.filter(
+            sale__in=_pos_sales(business, start, end, branch_ids),
+            variant__product__item_kind="service",
+        ).aggregate(
+            total=Sum(
+                ExpressionWrapper(
+                    (F("quantity") - F("returned_qty")) * F("variant__cost_price"),
+                    output_field=MONEY,
+                )
+            )
+        )["total"]
+        or ZERO
+    )
+    return sold - returned + services
 
 
 def revenue_for(business, start, end, branch_ids=None) -> Decimal:
@@ -142,7 +156,14 @@ def dashboard(business, start, end, period: str, branch_ids=None) -> dict:
     expenses = expenses_for(business, start, end, branch_ids)
     gross = revenue - cost
     net = gross - expenses
-    levels = _scope(StockLevel.objects.filter(business=business), branch_ids)
+    levels = _scope(
+        StockLevel.objects.filter(
+            business=business,
+            variant__product__item_kind="product",
+            variant__product__track_stock=True,
+        ),
+        branch_ids,
+    )
     low = levels.filter(quantity__lt=F("variant__min_stock")).count()
     receivables = Customer.objects.filter(business=business, is_active=True).aggregate(
         total=Sum("receivable_balance")
@@ -191,7 +212,7 @@ def sales_report(business, start, end, period: str, branch_ids=None) -> dict:
         lambda: {"product": "", "category": "Uncategorized", "qty": ZERO, "revenue": ZERO}
     )
     line_rows = (
-        SaleLine.objects.filter(sale__in=pos_qs)
+        SaleLine.objects.filter(sale__in=pos_qs, variant__product__item_kind="product")
         .values("variant__product_id", "variant__product__name", "variant__product__category__name")
         .annotate(qty=Sum(F("quantity") - F("returned_qty")), revenue=Sum(F("line_total") - F("returned_amount")))
         .order_by("-revenue")[:REPORT_ROW_CAP]
@@ -273,7 +294,14 @@ def _stock_item(row):
 
 
 def inventory_report(business, start, end, branch_ids=None) -> dict:
-    levels = _scope(StockLevel.objects.filter(business=business), branch_ids)
+    levels = _scope(
+        StockLevel.objects.filter(
+            business=business,
+            variant__product__item_kind="product",
+            variant__product__track_stock=True,
+        ),
+        branch_ids,
+    )
     stats = levels.aggregate(
         valuation=Sum(ExpressionWrapper(F("quantity") * F("variant__cost_price"), output_field=MONEY)),
         sku_locations=Count("id"),
@@ -462,19 +490,19 @@ def live_board(business, branch_ids=None) -> dict:
         .order_by("-updated_at")[:20]
     )
     catalog = list(
-        Product.objects.filter(business=business, is_active=True)
+        Product.objects.filter(business=business, is_active=True, item_kind=Product.ItemKind.PRODUCT)
         .select_related("category")
         .prefetch_related("variants")
         .order_by("name")[:80]
     )
     added_products = list(
-        Product.objects.filter(business=business)
+        Product.objects.filter(business=business, item_kind=Product.ItemKind.PRODUCT)
         .select_related("category")
         .prefetch_related("variants")
         .order_by("-created_at")[:12]
     )
     updated_products = list(
-        Product.objects.filter(business=business)
+        Product.objects.filter(business=business, item_kind=Product.ItemKind.PRODUCT)
         .select_related("category")
         .prefetch_related("variants")
         .order_by("-updated_at")[:16]
@@ -514,6 +542,8 @@ def live_board(business, branch_ids=None) -> dict:
 
     for line in sale_lines:
         product = line.variant.product
+        if product.item_kind != Product.ItemKind.PRODUCT:
+            continue
         at = line.created_at
         detail = f"{_qty(line.quantity)} sold · {line.sale.number}"
         put(
@@ -529,6 +559,8 @@ def live_board(business, branch_ids=None) -> dict:
 
     for line in receipt_lines:
         product = line.variant.product
+        if product.item_kind != Product.ItemKind.PRODUCT:
+            continue
         at = line.created_at
         supplier = line.receipt.supplier.name if line.receipt.supplier_id else "Supplier"
         detail = f"{_qty(line.quantity)} received from {supplier}"
@@ -545,6 +577,8 @@ def live_board(business, branch_ids=None) -> dict:
 
     for line in po_lines:
         product = line.variant.product
+        if product.item_kind != Product.ItemKind.PRODUCT:
+            continue
         at = line.updated_at or line.created_at
         supplier = line.order.supplier.name if line.order.supplier_id else "Supplier"
         detail = f"{_qty(line.quantity)} on PO {line.order.number} · {supplier}"
@@ -625,7 +659,14 @@ def owner_overview(business, start, end, period: str, branch_ids=None) -> dict:
     from apps.purchases.models import Supplier
 
     base = dashboard(business, start, end, period, branch_ids)
-    levels = _scope(StockLevel.objects.filter(business=business), branch_ids)
+    levels = _scope(
+        StockLevel.objects.filter(
+            business=business,
+            variant__product__item_kind="product",
+            variant__product__track_stock=True,
+        ),
+        branch_ids,
+    )
     stock_value = levels.aggregate(
         total=Sum(ExpressionWrapper(F("quantity") * F("variant__cost_price"), output_field=MONEY))
     )["total"] or ZERO
@@ -641,7 +682,10 @@ def owner_overview(business, start, end, period: str, branch_ids=None) -> dict:
         .order_by("-created_at")[:8]
     )
     top_products = (
-        SaleLine.objects.filter(sale__in=_pos_sales(business, start, end, branch_ids))
+        SaleLine.objects.filter(
+            sale__in=_pos_sales(business, start, end, branch_ids),
+            variant__product__item_kind="product",
+        )
         .values("variant__product__name")
         .annotate(qty=Sum(F("quantity") - F("returned_qty")), revenue=Sum(F("line_total") - F("returned_amount")))
         .order_by("-revenue")[:6]
@@ -692,8 +736,15 @@ def owner_overview(business, start, end, period: str, branch_ids=None) -> dict:
         **base,
         "stock_value": money(stock_value),
         "sku_locations": levels.count(),
-        "products": Product.objects.filter(business=business, is_active=True).count(),
-        "variants": ProductVariant.objects.filter(business=business, is_active=True).count(),
+        "products": Product.objects.filter(
+            business=business, is_active=True, item_kind=Product.ItemKind.PRODUCT
+        ).count(),
+        "services": Product.objects.filter(
+            business=business, is_active=True, item_kind=Product.ItemKind.SERVICE
+        ).count(),
+        "variants": ProductVariant.objects.filter(
+            business=business, is_active=True, product__item_kind=Product.ItemKind.PRODUCT
+        ).count(),
         "suppliers": Supplier.objects.filter(business=business, is_active=True).count(),
         "branches": Branch.objects.filter(business=business, is_active=True).count(),
         "users_total": users.count(),

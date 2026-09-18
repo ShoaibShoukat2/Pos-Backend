@@ -1,4 +1,4 @@
-from django.db.models import DecimalField, ExpressionWrapper, F, Q, Sum
+from django.db.models import Count, DecimalField, ExpressionWrapper, F, Q, Sum
 from rest_framework import mixins, viewsets
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -162,7 +162,12 @@ class SnapshotView(APIView):
             .select_related("product__category")
             .order_by("product__name", "name", "sku")
         )
-        catalog_total = variant_qs.count()
+        catalog_counts = variant_qs.aggregate(
+            total=Count("id"),
+            products=Count("id", filter=Q(product__item_kind="product")),
+            services=Count("id", filter=Q(product__item_kind="service")),
+        )
+        catalog_total = catalog_counts["total"] or 0
         variants = list(variant_qs[:CATALOG_PRELOAD])
         levels = _stock_map(business, branch)
         customers = Customer.objects.filter(business=business, is_active=True).order_by("name")
@@ -180,7 +185,12 @@ class SnapshotView(APIView):
         coupons = Coupon.objects.filter(business=business, is_active=True)
         money = DecimalField(max_digits=18, decimal_places=2)
         stock_value = (
-            StockLevel.objects.filter(business=business, branch=branch).aggregate(
+            StockLevel.objects.filter(
+                business=business,
+                branch=branch,
+                variant__product__item_kind="product",
+                variant__product__track_stock=True,
+            ).aggregate(
                 total=Sum(ExpressionWrapper(F("quantity") * F("variant__cost_price"), output_field=money))
             )["total"]
             or 0
@@ -193,6 +203,8 @@ class SnapshotView(APIView):
                 "catalog": _catalog_rows(variants, levels),
                 "catalog_truncated": catalog_total > CATALOG_PRELOAD,
                 "catalog_total": catalog_total,
+                "catalog_products": catalog_counts["products"] or 0,
+                "catalog_services": catalog_counts["services"] or 0,
                 "customers": customer_rows,
                 "customer_truncated": customer_total > CUSTOMER_PRELOAD,
                 "coupons": CouponSerializer(coupons, many=True).data,

@@ -1,6 +1,8 @@
 from decimal import Decimal
 
-from django.db.models import Count, DecimalField, Prefetch, Sum, Value
+from django.db import transaction
+from django.db.models import Count, DecimalField, F, Prefetch, Q, Sum, Value
+from django.db.models.deletion import ProtectedError
 from django.db.models.functions import Coalesce
 from rest_framework import viewsets
 from rest_framework.decorators import action
@@ -37,7 +39,9 @@ class CategoryViewSet(BusinessQuerysetMixin, viewsets.ModelViewSet):
         return "category.manage"
 
     def get_queryset(self):
-        return super().get_queryset().annotate(product_count=Count("products"))
+        return super().get_queryset().annotate(
+            product_count=Count("products", filter=Q(products__item_kind=F("kind"))),
+        )
 
 
 class BrandViewSet(BusinessQuerysetMixin, viewsets.ModelViewSet):
@@ -54,7 +58,9 @@ class BrandViewSet(BusinessQuerysetMixin, viewsets.ModelViewSet):
         return "brand.manage"
 
     def get_queryset(self):
-        return super().get_queryset().annotate(product_count=Count("products"))
+        return super().get_queryset().annotate(
+            product_count=Count("products", filter=Q(products__item_kind=Product.ItemKind.PRODUCT)),
+        )
 
 
 class UnitViewSet(BusinessQuerysetMixin, viewsets.ModelViewSet):
@@ -108,12 +114,19 @@ class ProductViewSet(BusinessQuerysetMixin, viewsets.ModelViewSet):
                     ).prefetch_related("stock_levels__branch"),
                 )
             )
+        if self.action == "list" and "item_kind" not in self.request.query_params:
+            qs = qs.filter(item_kind=Product.ItemKind.PRODUCT)
         return qs
 
     def perform_destroy(self, instance):
-        instance.is_active = False
-        instance.save(update_fields=["is_active"])
-        instance.variants.update(is_active=False)
+        try:
+            with transaction.atomic():
+                instance.variants.all().delete()
+                instance.delete()
+        except ProtectedError:
+            instance.is_active = False
+            instance.save(update_fields=["is_active", "updated_at"])
+            instance.variants.update(is_active=False)
 
     @action(detail=False, methods=["post"], url_path="seed-templates")
     def seed_templates(self, request):
@@ -150,6 +163,8 @@ class VariantViewSet(BusinessQuerysetMixin, viewsets.ModelViewSet):
         )
         if self.action == "retrieve":
             return qs.prefetch_related("stock_levels__branch")
+        if self.action == "list" and "item_kind" not in self.request.query_params:
+            qs = qs.filter(product__item_kind=Product.ItemKind.PRODUCT)
         return qs
 
     @action(detail=False, methods=["get"])

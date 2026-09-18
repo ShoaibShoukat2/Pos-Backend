@@ -25,6 +25,7 @@ class StockLevelViewSet(BusinessQuerysetMixin, mixins.ListModelMixin, viewsets.G
 
     def get_queryset(self):
         qs = super().get_queryset().select_related("variant__product", "branch")
+        qs = qs.filter(variant__product__item_kind="product", variant__product__track_stock=True)
         if self.request.query_params.get("low_stock") in {"1", "true", "yes"}:
             qs = qs.filter(quantity__lt=F("variant__min_stock"))
         return qs
