@@ -701,7 +701,7 @@ def owner_overview(business, start, end, period: str, branch_ids=None) -> dict:
                 "tone": "warn",
                 "title": f"{base['low_stock']} items below minimum stock",
                 "detail": "Restock before the next rush.",
-                "href": "/stock",
+                "href": "/products",
             }
         )
     if not open_shifts:
