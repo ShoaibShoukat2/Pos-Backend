@@ -101,6 +101,8 @@ class UserSerializer(serializers.ModelSerializer):
         request = self.context["request"]
         if role and role.business_id != request.user.business_id:
             raise serializers.ValidationError("Role does not belong to this business.")
+        if role and (role.name or "").lower() != "cashier":
+            raise serializers.ValidationError("Only the Cashier role can be assigned.")
         return role
 
     def validate_default_branch(self, branch):

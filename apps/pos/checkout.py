@@ -15,17 +15,7 @@ from apps.finance.cash import apply_cash, require_open_session
 from apps.finance.models import CashKind, PaymentMethod
 from apps.inventory.engine import record_sale
 from apps.pos.models import Sale, SaleLine, SalePayment, SaleStatus
-from apps.promotions.engine import (
-    ZERO,
-    coupon_discount,
-    earn_points,
-    find_coupon,
-    membership_discount,
-    money,
-    price_lines,
-    redeem_value,
-    tier_for,
-)
+from apps.promotions.engine import ZERO, money, price_lines
 
 TWOPLACES = Decimal("0.01")
 
@@ -80,21 +70,21 @@ def checkout_sale(*, business, user, payload: dict) -> Sale:
     priced = price_lines(business, items, when)
     subtotal = sum((row["line_total"] for row in priced), ZERO)
 
-    coupon = find_coupon(business, payload.get("coupon_code"), when) if payload.get("coupon_code") else None
-    disc_coupon = coupon_discount(subtotal, coupon)
+    coupon = None
+    disc_coupon = ZERO
 
     customer = None
     if payload.get("customer"):
         customer = Customer.objects.filter(business=business, pk=payload["customer"], is_active=True).first()
         if not customer:
             raise ValidationError({"customer": "Customer not found."})
-    disc_member = membership_discount(subtotal - disc_coupon, customer)
+    disc_member = ZERO
 
     manual_kind = (payload.get("manual_discount_kind") or "").strip()
     manual_value = money(payload.get("manual_discount_value") or 0)
     if manual_kind and not user.has_module_permission("sale.discount"):
         raise ValidationError({"manual_discount_kind": "You cannot apply a manual discount."})
-    remaining_after = max(ZERO, subtotal - disc_coupon - disc_member)
+    remaining_after = max(ZERO, subtotal)
     if manual_kind == "percent":
         disc_manual = money(remaining_after * manual_value / Decimal("100"))
     elif manual_kind == "fixed":
@@ -103,15 +93,9 @@ def checkout_sale(*, business, user, payload: dict) -> Sale:
         disc_manual = ZERO
         manual_kind = ""
 
-    after_discounts = max(ZERO, subtotal - disc_coupon - disc_member - disc_manual)
-    redeem_requested = Decimal(payload.get("redeem_points") or 0)
-    if redeem_requested and not customer:
-        raise ValidationError({"redeem_points": "Select a customer to redeem points."})
-    if customer and redeem_requested > customer.loyalty_points:
-        raise ValidationError({"redeem_points": f"Customer only has {customer.loyalty_points} points."})
-    disc_points, used_points = redeem_value(business, redeem_requested, after_discounts)
-
-    discount_total = money(disc_coupon + disc_member + disc_manual + disc_points)
+    used_points = ZERO
+    disc_points = ZERO
+    discount_total = money(disc_manual)
     total = money(max(ZERO, subtotal - discount_total))
 
     payments = payload.get("payments") or []
@@ -204,26 +188,13 @@ def checkout_sale(*, business, user, payload: dict) -> Sale:
             reference_id=sale.id,
         )
 
-    earned = earn_points(business, total) if customer else ZERO
+    earned = ZERO
     sale.loyalty_earned = earned
     sale.save(update_fields=["loyalty_earned"])
 
-    if coupon:
-        coupon.used_count += 1
-        coupon.save(update_fields=["used_count", "updated_at"])
-
     if customer:
         customer.total_purchases += total
-        customer.loyalty_points += earned
-        customer.loyalty_points -= used_points
-        if customer.loyalty_points < ZERO:
-            customer.loyalty_points = ZERO
-        auto = tier_for(customer)
-        if auto and not customer.membership_tier_id:
-            customer.membership_tier = auto
-        customer.save(
-            update_fields=["total_purchases", "loyalty_points", "membership_tier", "updated_at"]
-        )
+        customer.save(update_fields=["total_purchases", "updated_at"])
         if due > ZERO:
             apply_customer_ledger(
                 customer=customer,

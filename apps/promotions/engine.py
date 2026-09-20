@@ -68,7 +68,7 @@ def price_lines(business, items, when=None):
     """
     items: iterable of {variant, quantity}
     """
-    promos = active_promotions(business, when)
+    promos = []
     priced = []
     for item in items:
         variant = item["variant"]
