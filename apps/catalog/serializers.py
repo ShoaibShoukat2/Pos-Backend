@@ -206,6 +206,7 @@ class ProductSerializer(serializers.ModelSerializer):
 
         extra_kwargs = {
             "sku": {"required": False, "allow_blank": True},
+            "unit": {"required": False},
         }
 
     def validate_sku(self, value):
@@ -237,6 +238,14 @@ class ProductSerializer(serializers.ModelSerializer):
                 attrs["sku"] = _next_service_sku(self.context["request"].user.business)
             else:
                 raise serializers.ValidationError({"sku": "SKU is required."})
+        if not attrs.get("unit"):
+            if self.instance:
+                attrs.pop("unit", None)
+            else:
+                unit = _default_unit(self.context["request"].user.business)
+                if not unit:
+                    raise serializers.ValidationError({"unit": "No unit is available for this business."})
+                attrs["unit"] = unit
         return attrs
 
     @transaction.atomic
@@ -294,6 +303,13 @@ class ProductSerializer(serializers.ModelSerializer):
                 default.is_active = product.is_active
                 default.save()
         return product
+
+
+def _default_unit(business):
+    return (
+        Unit.objects.filter(business=business, short_code__iexact="pcs").first()
+        or Unit.objects.filter(business=business).first()
+    )
 
 
 def _next_service_sku(business):
