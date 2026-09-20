@@ -6,7 +6,8 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.businesses.serializers import BranchSerializer
+from apps.businesses.models import InvoiceSettings
+from apps.businesses.serializers import BranchSerializer, InvoiceSettingsSerializer
 from apps.catalog.models import ProductVariant
 from apps.accounts.helpers import is_cashier_user
 from apps.core.branch import accessible_branches, apply_branch_scope, resolve_branch
@@ -142,6 +143,11 @@ class CheckoutView(APIView):
         ser = CheckoutSerializer(data=request.data, context={"request": request})
         ser.is_valid(raise_exception=True)
         sale = ser.save()
+        sale = (
+            Sale.objects.select_related("customer", "branch", "created_by")
+            .prefetch_related("lines__variant__product", "payments")
+            .get(pk=sale.pk)
+        )
         return Response(SaleSerializer(sale).data, status=201)
 
 
@@ -201,8 +207,25 @@ class SnapshotView(APIView):
             or 0
         )
         open_shift = CashSession.objects.filter(branch=branch, status=CashSession.Status.OPEN).first()
+        invoice, _ = InvoiceSettings.objects.get_or_create(business=business)
+        logo = ""
+        if business.logo:
+            try:
+                logo = request.build_absolute_uri(business.logo.url)
+            except ValueError:
+                logo = ""
         return Response(
             {
+                "shop": {
+                    "name": business.name,
+                    "legal_name": business.legal_name,
+                    "phone": business.phone,
+                    "address": business.address,
+                    "city": business.city,
+                    "tax_number": business.tax_number,
+                    "logo": logo,
+                },
+                "invoice": InvoiceSettingsSerializer(invoice).data,
                 "branch": BranchSerializer(branch).data,
                 "branches": BranchSerializer(accessible_branches(request.user), many=True).data,
                 "catalog": _catalog_rows(variants, levels),
