@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.db.models import Count, DecimalField, ExpressionWrapper, F, Q, Sum
 from rest_framework import mixins, viewsets
 from rest_framework.permissions import IsAuthenticated
@@ -52,11 +54,15 @@ def _catalog_rows(variants, levels):
     return catalog
 
 
-def _stock_map(business, branch):
-    return {
-        str(row.variant_id): row.quantity
-        for row in StockLevel.objects.filter(business=business, branch=branch).only("variant_id", "quantity")
-    }
+def _stock_map(business, branch=None):
+    totals = {}
+    qs = StockLevel.objects.filter(business=business).only("variant_id", "quantity")
+    if branch:
+        qs = qs.filter(branch=branch)
+    for row in qs:
+        key = str(row.variant_id)
+        totals[key] = totals.get(key, Decimal("0")) + row.quantity
+    return totals
 
 
 class SaleViewSet(BusinessQuerysetMixin, mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet):
@@ -169,7 +175,7 @@ class SnapshotView(APIView):
         )
         catalog_total = catalog_counts["total"] or 0
         variants = list(variant_qs[:CATALOG_PRELOAD])
-        levels = _stock_map(business, branch)
+        levels = _stock_map(business)
         customers = Customer.objects.filter(business=business, is_active=True).order_by("name")
         customer_total = customers.count()
         customer_rows = []
@@ -187,7 +193,6 @@ class SnapshotView(APIView):
         stock_value = (
             StockLevel.objects.filter(
                 business=business,
-                branch=branch,
                 variant__product__item_kind="product",
                 variant__product__track_stock=True,
             ).aggregate(
@@ -243,5 +248,5 @@ class CatalogSearchView(APIView):
             )
         paginator = StandardPagination()
         page = paginator.paginate_queryset(qs, request)
-        levels = _stock_map(business, branch)
+        levels = _stock_map(business)
         return paginator.get_paginated_response(_catalog_rows(page, levels))

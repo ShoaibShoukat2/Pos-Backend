@@ -81,8 +81,6 @@ class CashSessionViewSet(BusinessQuerysetMixin, viewsets.ReadOnlyModelViewSet):
     def current(self, request):
         branch_id = request.query_params.get("branch")
         qs = self.get_queryset().filter(status=CashSession.Status.OPEN)
-        if branch_id:
-            qs = qs.filter(branch_id=branch_id)
         session = qs.first()
         if not session:
             return Response({"detail": "No open shift."}, status=404)

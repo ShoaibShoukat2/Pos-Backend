@@ -4,6 +4,7 @@ from rest_framework import serializers
 
 from apps.businesses.models import Branch
 from apps.catalog.models import ProductVariant
+from apps.core.branch import shop_branch
 from apps.inventory.models import StockLevel, StockMovement, StockOperation, StockOperationLine, StockTransfer, StockTransferLine
 
 
@@ -101,6 +102,7 @@ class StockOperationSerializer(serializers.ModelSerializer):
             "created_at",
         )
         read_only_fields = ("id", "number", "status", "posted_at", "created_at")
+        extra_kwargs = {"branch": {"required": False}}
 
     def validate_lines(self, lines):
         if not lines:
@@ -111,6 +113,8 @@ class StockOperationSerializer(serializers.ModelSerializer):
         from apps.inventory.services import create_and_post_operation
 
         validated.pop("business", None)
+        if not validated.get("branch"):
+            validated["branch"] = shop_branch(self.context["request"].user.business)
         return create_and_post_operation(
             business=self.context["request"].user.business,
             user=self.context["request"].user,

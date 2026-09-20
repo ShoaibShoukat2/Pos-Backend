@@ -92,6 +92,7 @@ class UserSerializer(serializers.ModelSerializer):
             "date_joined",
         )
         read_only_fields = ("is_owner", "date_joined", "full_name")
+        extra_kwargs = {"default_branch": {"required": False, "allow_null": True}}
 
     def get_permissions(self, obj):
         return sorted(obj.permission_codes())
@@ -122,16 +123,21 @@ class UserSerializer(serializers.ModelSerializer):
             user.save(update_fields=["default_branch"])
 
     def create(self, validated):
+        from apps.core.branch import shop_branch
+
         request = self.context["request"]
         password = validated.pop("password", None)
         branch_ids = validated.pop("assigned_branch_ids", None)
         if not password:
             raise serializers.ValidationError({"password": "Password is required."})
+        shop = shop_branch(request.user.business)
+        if not validated.get("default_branch"):
+            validated["default_branch"] = shop
         user = User(**validated)
         user.business = request.user.business
         user.set_password(password)
         user.save()
-        self._apply_branches(user, branch_ids)
+        self._apply_branches(user, branch_ids if branch_ids is not None else ([shop.id] if shop else []))
         return user
 
     def update(self, instance, validated):

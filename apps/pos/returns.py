@@ -3,7 +3,6 @@ from decimal import Decimal
 from django.db import transaction
 from rest_framework.exceptions import ValidationError
 
-from apps.core.branch import accessible_branches
 from apps.core.numbering import allocate_number
 from apps.customers.ledger import apply_customer_ledger
 from apps.customers.models import Customer, CustomerLedgerType
@@ -37,8 +36,6 @@ def process_sale_return(*, business, user, payload: dict) -> SaleReturn:
         raise ValidationError({"sale": "Ticket not found."})
     if sale.status not in OPEN_SALE_STATUSES:
         raise ValidationError("This ticket is already fully returned.")
-    if not accessible_branches(user).filter(pk=sale.branch_id).exists():
-        raise ValidationError({"sale": "This ticket is not on a branch you can use."})
 
     raw_lines = payload.get("lines") or []
     if not raw_lines:

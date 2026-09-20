@@ -98,7 +98,7 @@ class CheckoutPaymentSerializer(serializers.Serializer):
 
 class CheckoutSerializer(serializers.Serializer):
     client_uuid = serializers.UUIDField()
-    branch = serializers.UUIDField()
+    branch = serializers.UUIDField(required=False)
     customer = serializers.UUIDField(required=False, allow_null=True)
     coupon_code = serializers.CharField(required=False, allow_blank=True)
     manual_discount_kind = serializers.CharField(required=False, allow_blank=True)

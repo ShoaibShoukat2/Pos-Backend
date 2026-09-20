@@ -2,6 +2,7 @@ from rest_framework import serializers
 
 from apps.customers.models import Customer, CustomerLedgerEntry, CustomerPayment, CustomerSale
 from apps.customers.services import post_customer_payment, post_customer_sale
+from apps.core.branch import shop_branch
 
 
 class CustomerSerializer(serializers.ModelSerializer):
@@ -86,10 +87,13 @@ class CustomerSaleSerializer(serializers.ModelSerializer):
             "created_at",
         )
         read_only_fields = ("id", "number", "due_amount", "loyalty_points", "created_at")
+        extra_kwargs = {"branch": {"required": False}}
 
     def create(self, validated):
         request = self.context["request"]
         validated.pop("business", None)
+        if not validated.get("branch"):
+            validated["branch"] = shop_branch(request.user.business)
         return post_customer_sale(business=request.user.business, user=request.user, **validated)
 
 
@@ -110,8 +114,11 @@ class CustomerPaymentSerializer(serializers.ModelSerializer):
             "created_at",
         )
         read_only_fields = ("id", "number", "created_at")
+        extra_kwargs = {"branch": {"required": False}}
 
     def create(self, validated):
         request = self.context["request"]
         validated.pop("business", None)
+        if not validated.get("branch"):
+            validated["branch"] = shop_branch(request.user.business)
         return post_customer_payment(business=request.user.business, user=request.user, **validated)

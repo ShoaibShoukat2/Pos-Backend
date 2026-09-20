@@ -2,7 +2,6 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.core.branch import accessible_branch_ids, can_see_all_branches, resolve_branch
 from apps.core.permissions import HasAnyPermission
 from apps.reports.period import period_bounds
 from apps.reports.services import dashboard, financial_report, inventory_report, owner_overview, sales_report
@@ -10,12 +9,7 @@ from apps.reports.services import dashboard, financial_report, inventory_report,
 
 def report_scope(request):
     start, end, period = period_bounds(request, default="today")
-    selected = resolve_branch(request, required=False)
-    if selected:
-        return start, end, period, [selected.id]
-    if can_see_all_branches(request.user):
-        return start, end, period, None
-    return start, end, period, accessible_branch_ids(request.user)
+    return start, end, period, None
 
 
 class DashboardReportView(APIView):

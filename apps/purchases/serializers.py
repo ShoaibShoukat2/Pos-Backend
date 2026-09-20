@@ -14,6 +14,7 @@ from apps.purchases.models import (
     SupplierPayment,
 )
 from apps.purchases.services import create_purchase_order, pay_supplier, receive_goods
+from apps.core.branch import shop_branch
 
 
 class SupplierSerializer(serializers.ModelSerializer):
@@ -87,6 +88,7 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
             "updated_at",
         )
         read_only_fields = ("id", "number", "status", "created_at", "updated_at")
+        extra_kwargs = {"branch": {"required": False}}
 
     def get_total(self, obj):
         annotated = getattr(obj, "annotated_total", None)
@@ -97,6 +99,8 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
     def create(self, validated):
         request = self.context["request"]
         validated.pop("business", None)
+        if not validated.get("branch"):
+            validated["branch"] = shop_branch(request.user.business)
         return create_purchase_order(
             business=request.user.business,
             user=request.user,
@@ -133,9 +137,11 @@ class ReceiveGoodsSerializer(serializers.Serializer):
         supplier_id = validated.get("supplier") or (po.supplier_id if po else None)
         branch_id = validated.get("branch") or (po.branch_id if po else None)
         supplier = Supplier.objects.filter(business=business, pk=supplier_id).first()
-        branch = Branch.objects.filter(business=business, pk=branch_id).first()
+        branch = Branch.objects.filter(business=business, pk=branch_id).first() if branch_id else None
+        if not branch:
+            branch = shop_branch(business)
         if not supplier or not branch:
-            raise serializers.ValidationError("Supplier and receiving branch are required.")
+            raise serializers.ValidationError("Supplier is required.")
 
         resolved = []
         for row in validated["lines"]:
@@ -251,8 +257,11 @@ class SupplierPaymentSerializer(serializers.ModelSerializer):
             "created_at",
         )
         read_only_fields = ("id", "number", "created_at")
+        extra_kwargs = {"branch": {"required": False}}
 
     def create(self, validated):
         request = self.context["request"]
         validated.pop("business", None)
+        if not validated.get("branch"):
+            validated["branch"] = shop_branch(request.user.business)
         return pay_supplier(business=request.user.business, user=request.user, **validated)

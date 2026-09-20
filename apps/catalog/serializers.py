@@ -6,6 +6,7 @@ from rest_framework import serializers
 from apps.catalog.models import Brand, Category, Product, ProductVariant, Unit
 from apps.inventory.engine import apply_movement
 from apps.inventory.models import MovementType, StockLevel
+from apps.core.branch import shop_branch
 
 
 class CategorySerializer(serializers.ModelSerializer):
@@ -333,9 +334,13 @@ def _apply_opening(variant, rows, user):
         qty = Decimal(str(row.get("quantity") or 0))
         if qty <= 0:
             continue
-        branch = Branch.objects.filter(business=variant.business, pk=row.get("branch")).first()
+        branch = None
+        if row.get("branch"):
+            branch = Branch.objects.filter(business=variant.business, pk=row.get("branch")).first()
         if not branch:
-            raise serializers.ValidationError({"opening_stock": "Unknown branch for opening stock."})
+            branch = shop_branch(variant.business)
+        if not branch:
+            raise serializers.ValidationError({"opening_stock": "Shop is not set up."})
         apply_movement(
             variant=variant,
             branch=branch,

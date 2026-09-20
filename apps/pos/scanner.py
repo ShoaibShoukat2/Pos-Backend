@@ -28,11 +28,9 @@ class ScannerOpenView(APIView):
     required_any_permissions = ("pos.access", "sale.create")
 
     def post(self, request):
-        branch = resolve_branch(request, required=False)
+        branch = resolve_branch(request, required=False) or request.user.default_branch
         if not branch:
-            branch = request.user.default_branch
-        if not branch:
-            raise ValidationError({"branch": "Select a branch before connecting a scanner."})
+            raise ValidationError({"branch": "Shop is not set up."})
         session = ScannerSession.objects.create(
             business=request.user.business,
             branch=branch,

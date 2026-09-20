@@ -1,5 +1,6 @@
 from rest_framework import serializers
 
+from apps.core.branch import shop_branch
 from apps.finance.cash import close_shift, open_shift
 from apps.finance.models import CashMovement, CashSession, Expense, ExpenseCategory
 from apps.finance.services import post_expense
@@ -31,10 +32,13 @@ class ExpenseSerializer(serializers.ModelSerializer):
             "created_at",
         )
         read_only_fields = ("id", "number", "created_at")
+        extra_kwargs = {"branch": {"required": False}}
 
     def create(self, validated):
         request = self.context["request"]
         validated.pop("business", None)
+        if not validated.get("branch"):
+            validated["branch"] = shop_branch(request.user.business)
         return post_expense(business=request.user.business, user=request.user, **validated)
 
 
@@ -95,16 +99,20 @@ class CashSessionSerializer(serializers.ModelSerializer):
 
 
 class OpenShiftSerializer(serializers.Serializer):
-    branch = serializers.UUIDField()
+    branch = serializers.UUIDField(required=False)
     opening_cash = serializers.DecimalField(max_digits=14, decimal_places=2)
 
     def create(self, validated):
         from apps.businesses.models import Branch
 
         request = self.context["request"]
-        branch = Branch.objects.filter(business=request.user.business, pk=validated["branch"]).first()
+        branch = None
+        if validated.get("branch"):
+            branch = Branch.objects.filter(business=request.user.business, pk=validated["branch"]).first()
         if not branch:
-            raise serializers.ValidationError({"branch": "Unknown branch."})
+            branch = shop_branch(request.user.business)
+        if not branch:
+            raise serializers.ValidationError({"branch": "Shop is not set up."})
         return open_shift(
             business=request.user.business,
             branch=branch,

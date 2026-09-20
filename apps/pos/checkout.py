@@ -6,7 +6,8 @@ from django.utils.dateparse import parse_datetime
 from rest_framework.exceptions import ValidationError
 
 from apps.catalog.models import ProductVariant
-from apps.core.branch import accessible_branches
+from apps.businesses.models import Branch
+from apps.core.branch import shop_branch
 from apps.core.numbering import allocate_number
 from apps.customers.ledger import apply_customer_ledger
 from apps.customers.models import Customer, CustomerLedgerType, CustomerSale
@@ -50,9 +51,11 @@ def checkout_sale(*, business, user, payload: dict) -> Sale:
         return existing
 
     branch_id = payload.get("branch")
-    branch = accessible_branches(user).filter(pk=branch_id).first()
+    branch = Branch.objects.filter(business=business, pk=branch_id).first() if branch_id else None
     if not branch:
-        raise ValidationError({"branch": "Branch is not available to this user."})
+        branch = shop_branch(business)
+    if not branch:
+        raise ValidationError({"branch": "Shop is not set up."})
 
     raw_lines = payload.get("lines") or []
     if not raw_lines:
