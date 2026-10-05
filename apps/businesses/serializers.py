@@ -1,7 +1,7 @@
 from rest_framework import serializers
 
 from apps.businesses.models import Branch, Business, BusinessType, Currency, InvoiceSettings, TaxRate
-from apps.core.services import seed_electronics_catalog
+from apps.core.services import seed_electronics_catalog, seed_pizza_catalog
 
 
 class BusinessSerializer(serializers.ModelSerializer):
@@ -36,6 +36,8 @@ class BusinessSerializer(serializers.ModelSerializer):
         business = super().update(instance, validated)
         if business.business_type == BusinessType.ELECTRONICS and previous_type != BusinessType.ELECTRONICS:
             seed_electronics_catalog(business)
+        if business.business_type == BusinessType.PIZZA and previous_type != BusinessType.PIZZA:
+            seed_pizza_catalog(business)
         return business
 
 

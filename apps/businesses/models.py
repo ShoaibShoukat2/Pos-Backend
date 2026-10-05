@@ -9,6 +9,7 @@ class BusinessType(models.TextChoices):
     RESTAURANT = "restaurant", "Restaurant"
     PHARMACY = "pharmacy", "Pharmacy"
     ELECTRONICS = "electronics", "Electronics"
+    PIZZA = "pizza", "Pizza shop"
     GENERAL = "general", "General Retail"
 
 

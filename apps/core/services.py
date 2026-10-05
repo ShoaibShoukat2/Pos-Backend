@@ -110,6 +110,97 @@ ELECTRONICS_SERVICES = (
     },
 )
 
+PIZZA_CATEGORIES = (
+    "Classic pizzas",
+    "Specialty pizzas",
+    "Sides",
+    "Drinks",
+    "Desserts",
+    "Deals",
+)
+
+PIZZA_EXPENSE_CATEGORIES = (
+    "Dough and cheese",
+    "Toppings",
+    "Gas and oven",
+    "Delivery",
+)
+
+PIZZA_SIZED = (
+    {
+        "name": "Margherita",
+        "category": "Classic pizzas",
+        "sku": "PZA-MARG",
+        "description": "Tomato sauce, mozzarella and basil.",
+        "sizes": (
+            ("Small", "S", "280.00", "699.00"),
+            ("Medium", "M", "380.00", "999.00"),
+            ("Large", "L", "480.00", "1299.00"),
+        ),
+    },
+    {
+        "name": "Pepperoni",
+        "category": "Classic pizzas",
+        "sku": "PZA-PEP",
+        "description": "Tomato sauce, mozzarella and pepperoni.",
+        "sizes": (
+            ("Small", "S", "320.00", "849.00"),
+            ("Medium", "M", "430.00", "1199.00"),
+            ("Large", "L", "540.00", "1499.00"),
+        ),
+    },
+    {
+        "name": "Chicken tikka",
+        "category": "Classic pizzas",
+        "sku": "PZA-TIKKA",
+        "description": "Tikka chicken, onion and cheese.",
+        "sizes": (
+            ("Small", "S", "340.00", "899.00"),
+            ("Medium", "M", "460.00", "1249.00"),
+            ("Large", "L", "580.00", "1599.00"),
+        ),
+    },
+    {
+        "name": "BBQ chicken",
+        "category": "Specialty pizzas",
+        "sku": "PZA-BBQ",
+        "description": "BBQ sauce, chicken and peppers.",
+        "sizes": (
+            ("Small", "S", "360.00", "949.00"),
+            ("Medium", "M", "490.00", "1349.00"),
+            ("Large", "L", "620.00", "1699.00"),
+        ),
+    },
+    {
+        "name": "Veggie supreme",
+        "category": "Specialty pizzas",
+        "sku": "PZA-VEG",
+        "description": "Mushroom, olive, onion, capsicum and cheese.",
+        "sizes": (
+            ("Small", "S", "300.00", "799.00"),
+            ("Medium", "M", "410.00", "1149.00"),
+            ("Large", "L", "520.00", "1449.00"),
+        ),
+    },
+)
+
+PIZZA_SINGLES = (
+    {"name": "Garlic bread", "category": "Sides", "sku": "SIDE-GARLIC", "cost": "80.00", "price": "250.00"},
+    {"name": "Chicken wings", "category": "Sides", "sku": "SIDE-WINGS", "cost": "220.00", "price": "549.00"},
+    {"name": "Fries", "category": "Sides", "sku": "SIDE-FRIES", "cost": "60.00", "price": "199.00"},
+    {"name": "Soft drink", "category": "Drinks", "sku": "DRK-SOFT", "cost": "40.00", "price": "120.00"},
+    {"name": "Mineral water", "category": "Drinks", "sku": "DRK-WATER", "cost": "20.00", "price": "70.00"},
+    {"name": "Brownie", "category": "Desserts", "sku": "DES-BROWN", "cost": "70.00", "price": "220.00"},
+    {
+        "name": "Family deal",
+        "category": "Deals",
+        "sku": "DEAL-FAMILY",
+        "cost": "1100.00",
+        "price": "2499.00",
+        "description": "Two large pizzas and a 1.5L drink.",
+    },
+)
+
 DEFAULT_EXPENSE_CATEGORIES = (
     "Rent",
     "Electricity",
@@ -188,6 +279,8 @@ def seed_business_defaults(business, owner, *, branch_name="Head Office"):
     seed_loyalty(business)
     if business.business_type == "electronics":
         seed_electronics_catalog(business)
+    if business.business_type == "pizza":
+        seed_pizza_catalog(business)
 
     owner.business = business
     owner.role = roles_by_name.get("Admin")
@@ -263,6 +356,93 @@ def seed_electronics_catalog(business) -> int:
             has_variants=False,
             duration_minutes=row["duration_minutes"],
             warranty_days=row["warranty_days"],
+        )
+        ProductVariant.objects.create(
+            business=business,
+            product=product,
+            name=product.name,
+            sku=product.sku,
+            cost_price=product.cost_price,
+            selling_price=product.selling_price,
+            is_default=True,
+        )
+        created += 1
+    return created
+
+
+def seed_pizza_catalog(business) -> int:
+    from apps.businesses.models import TaxRate
+    from apps.catalog.models import Category, Product, ProductVariant, Unit
+    from apps.finance.models import ExpenseCategory
+
+    seed_units(business)
+    unit = Unit.objects.filter(business=business, short_code="pcs").first() or Unit.objects.filter(business=business).first()
+    if not unit:
+        return 0
+    tax = TaxRate.objects.filter(business=business, is_default=True).first()
+    for name in PIZZA_CATEGORIES:
+        Category.objects.get_or_create(
+            business=business,
+            name=name,
+            defaults={"kind": Category.Kind.PRODUCT},
+        )
+    for name in PIZZA_EXPENSE_CATEGORIES:
+        ExpenseCategory.objects.get_or_create(
+            business=business,
+            name=name,
+            defaults={"is_system": True},
+        )
+
+    created = 0
+    for row in PIZZA_SIZED:
+        if Product.objects.filter(business=business, sku=row["sku"]).exists():
+            continue
+        category = Category.objects.filter(business=business, name=row["category"]).first()
+        medium = next(size for size in row["sizes"] if size[1] == "M")
+        product = Product.objects.create(
+            business=business,
+            name=row["name"],
+            description=row["description"],
+            category=category,
+            unit=unit,
+            tax_rate=tax,
+            sku=row["sku"],
+            cost_price=medium[2],
+            selling_price=medium[3],
+            item_kind=Product.ItemKind.PRODUCT,
+            track_stock=False,
+            has_variants=True,
+        )
+        for size_name, code, cost, price in row["sizes"]:
+            ProductVariant.objects.create(
+                business=business,
+                product=product,
+                name=size_name,
+                sku=f"{row['sku']}-{code}",
+                attributes={"size": size_name},
+                cost_price=cost,
+                selling_price=price,
+                is_default=code == "M",
+            )
+        created += 1
+
+    for row in PIZZA_SINGLES:
+        if Product.objects.filter(business=business, sku=row["sku"]).exists():
+            continue
+        category = Category.objects.filter(business=business, name=row["category"]).first()
+        product = Product.objects.create(
+            business=business,
+            name=row["name"],
+            description=row.get("description", ""),
+            category=category,
+            unit=unit,
+            tax_rate=tax,
+            sku=row["sku"],
+            cost_price=row["cost"],
+            selling_price=row["price"],
+            item_kind=Product.ItemKind.PRODUCT,
+            track_stock=False,
+            has_variants=False,
         )
         ProductVariant.objects.create(
             business=business,

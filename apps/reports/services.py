@@ -705,6 +705,32 @@ def owner_overview(business, start, end, period: str, branch_ids=None) -> dict:
     product_sale_percent = (
         (Decimal(products_sold) / Decimal(catalog_products)) * Decimal(100) if catalog_products else ZERO
     )
+    category_rows = []
+    category_revenue = ZERO
+    for row in (
+        SaleLine.objects.filter(
+            sale__in=_pos_sales(business, start, end, branch_ids),
+            variant__product__item_kind="product",
+        )
+        .values("variant__product__category__name")
+        .annotate(
+            qty=Sum(F("quantity") - F("returned_qty")),
+            revenue=Sum(F("line_total") - F("returned_amount")),
+        )
+        .order_by("-revenue")
+    ):
+        qty = row["qty"] or ZERO
+        if qty <= 0:
+            continue
+        rev = row["revenue"] or ZERO
+        category_rows.append(
+            {
+                "category": row["variant__product__category__name"] or "Uncategorized",
+                "qty": qty,
+                "revenue": rev,
+            }
+        )
+        category_revenue += rev
     daily = _series_from_qs(
         [_pos_sales(business, start, end, branch_ids), _legacy_sales(business, start, end, branch_ids)],
         "daily",
@@ -773,6 +799,15 @@ def owner_overview(business, start, end, period: str, branch_ids=None) -> dict:
                 "share": f"{((row['revenue'] / sold_revenue) * Decimal(100)) if sold_revenue else ZERO:.1f}",
             }
             for row in sold_rows[:12]
+        ],
+        "category_sales": [
+            {
+                "category": row["category"],
+                "qty": f"{row['qty']:.3f}",
+                "revenue": money(row["revenue"]),
+                "share": f"{((row['revenue'] / category_revenue) * Decimal(100)) if category_revenue else ZERO:.1f}",
+            }
+            for row in category_rows
         ],
         "recent_sales": [
             {
