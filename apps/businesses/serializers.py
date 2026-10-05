@@ -126,6 +126,7 @@ class InvoiceSettingsSerializer(serializers.ModelSerializer):
             "show_tax_breakdown",
             "show_cashier_name",
             "paper_size",
+            "design",
             "preview_number",
             "updated_at",
         )

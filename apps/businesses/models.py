@@ -110,6 +110,12 @@ class InvoiceSettings(TimeStampedModel):
         MM58 = "58mm", "58mm thermal"
         A4 = "A4", "A4"
 
+    class Design(models.TextChoices):
+        CLASSIC = "classic", "Classic"
+        COMPACT = "compact", "Compact"
+        BOLD = "bold", "Bold"
+        FORMAL = "formal", "Formal"
+
     business = models.OneToOneField(
         Business,
         on_delete=models.CASCADE,
@@ -127,6 +133,11 @@ class InvoiceSettings(TimeStampedModel):
         max_length=8,
         choices=PaperSize.choices,
         default=PaperSize.MM80,
+    )
+    design = models.CharField(
+        max_length=16,
+        choices=Design.choices,
+        default=Design.CLASSIC,
     )
 
     def __str__(self):
