@@ -5,11 +5,12 @@ from django.urls import include, path
 from rest_framework_simplejwt.views import TokenRefreshView
 
 from apps.accounts.views import CashierLoginView, LoginView, OwnerLoginView, PlatformLoginView
-from apps.core.views import HealthView
+from apps.core.views import AppUpdateView, HealthView
 
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/health/", HealthView.as_view(), name="health"),
+    path("api/app-update/", AppUpdateView.as_view(), name="app_update"),
     path("api/auth/login/", LoginView.as_view(), name="token_obtain_pair"),
     path("api/auth/owner/login/", OwnerLoginView.as_view(), name="owner_token_obtain_pair"),
     path("api/auth/platform/login/", PlatformLoginView.as_view(), name="platform_token_obtain_pair"),

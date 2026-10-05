@@ -90,10 +90,11 @@ if DATABASE_URL.startswith("postgres"):
         }
     }
 else:
+    sqlite_name = os.getenv("POS_DB_PATH", "").strip() or str(BASE_DIR / "db.sqlite3")
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.sqlite3",
-            "NAME": BASE_DIR / "db.sqlite3",
+            "NAME": sqlite_name,
         }
     }
 

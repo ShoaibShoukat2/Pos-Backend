@@ -681,14 +681,29 @@ def owner_overview(business, start, end, period: str, branch_ids=None) -> dict:
         .select_related("customer", "branch", "created_by")
         .order_by("-created_at")[:8]
     )
-    top_products = (
+    catalog_products = Product.objects.filter(
+        business=business, is_active=True, item_kind=Product.ItemKind.PRODUCT
+    ).count()
+    sold_rows = []
+    sold_revenue = ZERO
+    for row in (
         SaleLine.objects.filter(
             sale__in=_pos_sales(business, start, end, branch_ids),
             variant__product__item_kind="product",
         )
         .values("variant__product__name")
         .annotate(qty=Sum(F("quantity") - F("returned_qty")), revenue=Sum(F("line_total") - F("returned_amount")))
-        .order_by("-revenue")[:6]
+        .order_by("-revenue")
+    ):
+        qty = row["qty"] or ZERO
+        if qty <= 0:
+            continue
+        rev = row["revenue"] or ZERO
+        sold_rows.append({"name": row["variant__product__name"] or "Product", "qty": qty, "revenue": rev})
+        sold_revenue += rev
+    products_sold = len(sold_rows)
+    product_sale_percent = (
+        (Decimal(products_sold) / Decimal(catalog_products)) * Decimal(100) if catalog_products else ZERO
     )
     daily = _series_from_qs(
         [_pos_sales(business, start, end, branch_ids), _legacy_sales(business, start, end, branch_ids)],
@@ -736,9 +751,9 @@ def owner_overview(business, start, end, period: str, branch_ids=None) -> dict:
         **base,
         "stock_value": money(stock_value),
         "sku_locations": levels.count(),
-        "products": Product.objects.filter(
-            business=business, is_active=True, item_kind=Product.ItemKind.PRODUCT
-        ).count(),
+        "products": catalog_products,
+        "products_sold": products_sold,
+        "product_sale_percent": f"{product_sale_percent:.1f}",
         "services": Product.objects.filter(
             business=business, is_active=True, item_kind=Product.ItemKind.SERVICE
         ).count(),
@@ -752,11 +767,12 @@ def owner_overview(business, start, end, period: str, branch_ids=None) -> dict:
         "daily": daily,
         "top_products": [
             {
-                "product": row["variant__product__name"] or "Product",
-                "qty": f"{row['qty'] or 0:.3f}",
+                "product": row["name"],
+                "qty": f"{row['qty']:.3f}",
                 "revenue": money(row["revenue"]),
+                "share": f"{((row['revenue'] / sold_revenue) * Decimal(100)) if sold_revenue else ZERO:.1f}",
             }
-            for row in top_products
+            for row in sold_rows[:12]
         ],
         "recent_sales": [
             {
