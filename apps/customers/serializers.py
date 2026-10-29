@@ -6,9 +6,6 @@ from apps.core.branch import shop_branch
 
 
 class CustomerSerializer(serializers.ModelSerializer):
-    membership_name = serializers.SerializerMethodField()
-    membership_discount = serializers.SerializerMethodField()
-
     class Meta:
         model = Customer
         fields = (
@@ -24,8 +21,6 @@ class CustomerSerializer(serializers.ModelSerializer):
             "total_purchases",
             "loyalty_points",
             "membership_tier",
-            "membership_name",
-            "membership_discount",
             "is_active",
             "created_at",
         )
@@ -34,22 +29,8 @@ class CustomerSerializer(serializers.ModelSerializer):
             "receivable_balance",
             "total_purchases",
             "loyalty_points",
-            "membership_name",
-            "membership_discount",
             "created_at",
         )
-
-    def get_membership_name(self, obj):
-        from apps.promotions.engine import tier_for
-
-        tier = tier_for(obj)
-        return tier.name if tier else ""
-
-    def get_membership_discount(self, obj):
-        from apps.promotions.engine import tier_for
-
-        tier = tier_for(obj)
-        return f"{tier.discount_percent:.2f}" if tier else "0.00"
 
 
 class CustomerLedgerSerializer(serializers.ModelSerializer):

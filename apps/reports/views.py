@@ -9,7 +9,10 @@ from apps.reports.services import dashboard, financial_report, inventory_report,
 
 def report_scope(request):
     start, end, period = period_bounds(request, default="today")
-    return start, end, period, None
+    # Parse optional branch filter: ?branch=uuid or ?branch=uuid1,uuid2
+    branch_param = (request.query_params.get("branch") or "").strip()
+    branch_ids = [b.strip() for b in branch_param.split(",") if b.strip()] if branch_param else None
+    return start, end, period, branch_ids
 
 
 class DashboardReportView(APIView):

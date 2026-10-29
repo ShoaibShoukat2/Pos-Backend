@@ -3,7 +3,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
-from apps.promotions.models import Coupon, CouponKind, LoyaltySettings, MembershipTier, Promotion, PromotionKind
+from apps.promotions.models import Promotion, PromotionKind
 
 ZERO = Decimal("0")
 TWOPLACES = Decimal("0.01")
@@ -11,27 +11,6 @@ TWOPLACES = Decimal("0.01")
 
 def money(value) -> Decimal:
     return Decimal(value or 0).quantize(TWOPLACES, rounding=ROUND_HALF_UP)
-
-
-def loyalty_settings(business) -> LoyaltySettings:
-    settings, _ = LoyaltySettings.objects.get_or_create(business=business)
-    return settings
-
-
-def tier_for(customer):
-    if not customer:
-        return None
-    if customer.membership_tier_id and customer.membership_tier.is_active:
-        return customer.membership_tier
-    return (
-        MembershipTier.objects.filter(
-            business=customer.business,
-            is_active=True,
-            min_points__lte=customer.loyalty_points,
-        )
-        .order_by("-min_points")
-        .first()
-    )
 
 
 def active_promotions(business, when=None):
@@ -66,9 +45,10 @@ def _unit_after_promo(list_price: Decimal, promo: Promotion) -> Decimal:
 
 def price_lines(business, items, when=None):
     """
+    Price each cart line, applying active promotions.
     items: iterable of {variant, quantity}
     """
-    promos = []
+    promos = active_promotions(business, when)  # load active promotions
     priced = []
     for item in items:
         variant = item["variant"]
@@ -106,62 +86,3 @@ def price_lines(business, items, when=None):
             }
         )
     return priced
-
-
-def find_coupon(business, code, when=None):
-    if not code:
-        return None
-    when = when or timezone.now()
-    coupon = Coupon.objects.filter(business=business, code__iexact=code.strip()).first()
-    if not coupon or not coupon.is_active:
-        raise ValidationError({"coupon_code": "Coupon is not valid."})
-    if coupon.starts_at and coupon.starts_at > when:
-        raise ValidationError({"coupon_code": "Coupon is not active yet."})
-    if coupon.ends_at and coupon.ends_at < when:
-        raise ValidationError({"coupon_code": "Coupon has expired."})
-    if coupon.usage_limit and coupon.used_count >= coupon.usage_limit:
-        raise ValidationError({"coupon_code": "Coupon usage limit reached."})
-    return coupon
-
-
-def coupon_discount(subtotal: Decimal, coupon: Coupon | None) -> Decimal:
-    if not coupon:
-        return ZERO
-    if subtotal < Decimal(coupon.min_spend):
-        raise ValidationError({"coupon_code": f"Minimum spend for this coupon is Rs {coupon.min_spend}."})
-    if coupon.kind == CouponKind.PERCENT:
-        amount = money(subtotal * Decimal(coupon.value) / Decimal("100"))
-    else:
-        amount = money(coupon.value)
-    if coupon.max_discount and coupon.max_discount > ZERO:
-        amount = min(amount, money(coupon.max_discount))
-    return min(amount, subtotal)
-
-
-def membership_discount(subtotal: Decimal, customer) -> Decimal:
-    tier = tier_for(customer)
-    if not tier or Decimal(tier.discount_percent) <= ZERO:
-        return ZERO
-    return money(subtotal * Decimal(tier.discount_percent) / Decimal("100"))
-
-
-def redeem_value(business, points, remaining: Decimal) -> tuple[Decimal, Decimal]:
-    settings = loyalty_settings(business)
-    pts = Decimal(points or 0)
-    if pts <= ZERO:
-        return ZERO, ZERO
-    if not settings.is_active:
-        raise ValidationError({"redeem_points": "Loyalty redemption is turned off."})
-    if pts < Decimal(settings.min_redeem_points):
-        raise ValidationError({"redeem_points": f"Redeem at least {settings.min_redeem_points} points."})
-    value = money(pts * Decimal(settings.redemption_rate))
-    value = min(value, remaining)
-    used_points = ZERO if Decimal(settings.redemption_rate) == ZERO else money(value / Decimal(settings.redemption_rate))
-    return value, used_points
-
-
-def earn_points(business, amount: Decimal) -> Decimal:
-    settings = loyalty_settings(business)
-    if not settings.is_active or Decimal(settings.points_per_amount) <= ZERO or amount <= ZERO:
-        return ZERO
-    return (amount / Decimal(settings.points_per_amount)).to_integral_value()

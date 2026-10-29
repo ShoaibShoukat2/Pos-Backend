@@ -67,50 +67,53 @@ def checkout_sale(*, business, user, payload: dict) -> Sale:
         items.append({"variant": variant, "quantity": row.get("quantity")})
 
     when = _parse_when(payload.get("sold_at"))
+
+    # Price lines — promotions are applied here automatically
     priced = price_lines(business, items, when)
     subtotal = sum((row["line_total"] for row in priced), ZERO)
 
-    coupon = None
-    disc_coupon = ZERO
+    # Manual discount (percent or fixed amount)
+    manual_kind = (payload.get("manual_discount_kind") or "").strip()
+    manual_value = money(payload.get("manual_discount_value") or 0)
+    if manual_kind and not user.has_module_permission("sale.discount"):
+        raise ValidationError({"manual_discount_kind": "You cannot apply a manual discount."})
+    if manual_kind == "percent":
+        disc_manual = money(subtotal * manual_value / Decimal("100"))
+    elif manual_kind == "fixed":
+        disc_manual = min(manual_value, subtotal)
+    else:
+        disc_manual = ZERO
+        manual_kind = ""
 
+    discount_total = disc_manual
+    total = money(max(ZERO, subtotal - discount_total))
+
+    # Customer
     customer = None
     if payload.get("customer"):
         customer = Customer.objects.filter(business=business, pk=payload["customer"], is_active=True).first()
         if not customer:
             raise ValidationError({"customer": "Customer not found."})
-    disc_member = ZERO
 
-    manual_kind = (payload.get("manual_discount_kind") or "").strip()
-    manual_value = money(payload.get("manual_discount_value") or 0)
-    if manual_kind and not user.has_module_permission("sale.discount"):
-        raise ValidationError({"manual_discount_kind": "You cannot apply a manual discount."})
-    remaining_after = max(ZERO, subtotal)
-    if manual_kind == "percent":
-        disc_manual = money(remaining_after * manual_value / Decimal("100"))
-    elif manual_kind == "fixed":
-        disc_manual = min(manual_value, remaining_after)
-    else:
-        disc_manual = ZERO
-        manual_kind = ""
-
-    used_points = ZERO
-    disc_points = ZERO
-    discount_total = money(disc_manual)
-    total = money(max(ZERO, subtotal - discount_total))
-
+    # Payment
     payments = payload.get("payments") or []
     tendered = money(sum((Decimal(p.get("amount") or 0) for p in payments), ZERO))
     if tendered < ZERO:
         raise ValidationError({"payments": "Payment cannot be negative."})
     paid = money(min(tendered, total))
     due = money(total - paid)
+
+    # Credit validation
     if due > ZERO and not customer:
         raise ValidationError({"customer": "A customer is required for credit."})
-    if due > ZERO and customer and customer.credit_limit > ZERO:
+    if due > ZERO and customer:
+        # credit_limit = 0 means NO credit allowed
+        if customer.credit_limit == ZERO:
+            raise ValidationError({"customer": "This customer does not have a credit limit set."})
         if customer.receivable_balance + due > customer.credit_limit:
             raise ValidationError(
                 f"Credit limit Rs {customer.credit_limit} would be exceeded. "
-                f"Current due Rs {customer.receivable_balance}."
+                f"Current balance Rs {customer.receivable_balance}."
             )
 
     methods = [p.get("method") or PaymentMethod.CASH for p in payments if Decimal(p.get("amount") or 0) > ZERO]
@@ -129,12 +132,12 @@ def checkout_sale(*, business, user, payload: dict) -> Sale:
         paid_amount=paid,
         due_amount=due,
         net_total=total,
-        coupon=coupon,
-        coupon_code=coupon.code if coupon else "",
+        coupon=None,
+        coupon_code="",
         manual_discount_kind=manual_kind,
         manual_discount_value=manual_value,
         loyalty_earned=ZERO,
-        loyalty_redeemed=used_points,
+        loyalty_redeemed=ZERO,
         payment_method=primary_method,
         notes=payload.get("notes") or "",
         sold_at=when,
@@ -163,6 +166,7 @@ def checkout_sale(*, business, user, payload: dict) -> Sale:
                 reason=f"POS {sale.number}",
             )
 
+    # Record payments
     cash_paid = ZERO
     remaining = paid
     for pay in payments:
@@ -176,6 +180,7 @@ def checkout_sale(*, business, user, payload: dict) -> Sale:
         if method == PaymentMethod.CASH:
             cash_paid = money(cash_paid + applied)
 
+    # Update cash session for cash payments
     if cash_paid > ZERO:
         session = require_open_session(branch)
         apply_cash(
@@ -188,10 +193,7 @@ def checkout_sale(*, business, user, payload: dict) -> Sale:
             reference_id=sale.id,
         )
 
-    earned = ZERO
-    sale.loyalty_earned = earned
-    sale.save(update_fields=["loyalty_earned"])
-
+    # Update customer record and ledger
     if customer:
         customer.total_purchases += total
         customer.save(update_fields=["total_purchases", "updated_at"])
@@ -214,7 +216,7 @@ def checkout_sale(*, business, user, payload: dict) -> Sale:
             paid_amount=paid,
             due_amount=due,
             payment_method=primary_method,
-            loyalty_points=earned,
+            loyalty_points=ZERO,
             notes=f"POS {sale.number}",
             created_by=user,
             pos_sale=sale,

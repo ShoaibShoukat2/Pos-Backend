@@ -21,9 +21,8 @@ from apps.finance.serializers import CashSessionSerializer
 from apps.inventory.models import StockLevel
 from apps.pos.models import Sale, SaleReturn
 from apps.pos.serializers import CheckoutSerializer, ReturnSerializer, SaleReturnSerializer, SaleSerializer, SyncSerializer
-from apps.promotions.engine import active_promotions, loyalty_settings, tier_for
-from apps.promotions.models import Coupon, MembershipTier
-from apps.promotions.serializers import CouponSerializer, LoyaltySettingsSerializer, MembershipTierSerializer, PromotionSerializer
+from apps.promotions.engine import active_promotions
+from apps.promotions.serializers import PromotionSerializer
 
 CATALOG_PRELOAD = 200
 CUSTOMER_PRELOAD = 80
@@ -184,25 +183,15 @@ class SnapshotView(APIView):
         levels = _stock_map(business)
         customers = Customer.objects.filter(business=business, is_active=True).order_by("name")
         customer_total = customers.count()
-        customer_rows = []
-        for c in customers[:CUSTOMER_PRELOAD]:
-            tier = tier_for(c)
-            customer_rows.append(
-                {
-                    **CustomerSerializer(c).data,
-                    "membership_name": tier.name if tier else "",
-                    "membership_discount": f"{tier.discount_percent:.2f}" if tier else "0.00",
-                }
-            )
-        coupons = Coupon.objects.filter(business=business, is_active=True)
-        money = DecimalField(max_digits=18, decimal_places=2)
+        customer_rows = list(CustomerSerializer(customers[:CUSTOMER_PRELOAD], many=True).data)
+        money_field = DecimalField(max_digits=18, decimal_places=2)
         stock_value = (
             StockLevel.objects.filter(
                 business=business,
                 variant__product__item_kind="product",
                 variant__product__track_stock=True,
             ).aggregate(
-                total=Sum(ExpressionWrapper(F("quantity") * F("variant__cost_price"), output_field=money))
+                total=Sum(ExpressionWrapper(F("quantity") * F("variant__cost_price"), output_field=money_field))
             )["total"]
             or 0
         )
@@ -235,12 +224,7 @@ class SnapshotView(APIView):
                 "catalog_services": catalog_counts["services"] or 0,
                 "customers": customer_rows,
                 "customer_truncated": customer_total > CUSTOMER_PRELOAD,
-                "coupons": CouponSerializer(coupons, many=True).data,
                 "promotions": PromotionSerializer(active_promotions(business), many=True).data,
-                "tiers": MembershipTierSerializer(
-                    MembershipTier.objects.filter(business=business, is_active=True), many=True
-                ).data,
-                "loyalty": LoyaltySettingsSerializer(loyalty_settings(business)).data,
                 "open_shift": CashSessionSerializer(open_shift).data if open_shift else None,
                 "stock_value": str(stock_value),
             }
