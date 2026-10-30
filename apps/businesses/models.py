@@ -26,6 +26,8 @@ class Business(TimeStampedModel):
     postal_code = models.CharField(max_length=20, blank=True)
     tax_number = models.CharField(max_length=60, blank=True, help_text="NTN / GST / VAT")
     logo = models.ImageField(upload_to="logos/", blank=True, null=True)
+    primary_color = models.CharField(max_length=7, default="#1c1814", blank=True)
+    accent_color = models.CharField(max_length=7, default="#d4892a", blank=True)
     timezone = models.CharField(max_length=60, default="Asia/Karachi")
     date_format = models.CharField(max_length=20, default="DD/MM/YYYY")
     fiscal_year_start_month = models.PositiveSmallIntegerField(default=7)

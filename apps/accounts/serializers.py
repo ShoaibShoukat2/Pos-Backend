@@ -160,6 +160,9 @@ class MeSerializer(UserSerializer):
     business_id = serializers.SerializerMethodField()
     business_name = serializers.SerializerMethodField()
     business_type = serializers.SerializerMethodField()
+    business_logo = serializers.SerializerMethodField()
+    business_primary_color = serializers.SerializerMethodField()
+    business_accent_color = serializers.SerializerMethodField()
     is_platform_admin = serializers.BooleanField(read_only=True)
     is_cashier = serializers.SerializerMethodField()
 
@@ -168,6 +171,9 @@ class MeSerializer(UserSerializer):
             "business_id",
             "business_name",
             "business_type",
+            "business_logo",
+            "business_primary_color",
+            "business_accent_color",
             "is_platform_admin",
             "is_cashier",
         )
@@ -183,6 +189,24 @@ class MeSerializer(UserSerializer):
 
     def get_business_type(self, obj):
         return obj.business.business_type if obj.business_id else None
+
+    def get_business_logo(self, obj):
+        if not obj.business_id or not obj.business.logo:
+            return None
+        request = self.context.get("request")
+        if request:
+            return request.build_absolute_uri(obj.business.logo.url)
+        return obj.business.logo.url
+
+    def get_business_primary_color(self, obj):
+        if not obj.business_id:
+            return "#1c1814"
+        return obj.business.primary_color or "#1c1814"
+
+    def get_business_accent_color(self, obj):
+        if not obj.business_id:
+            return "#d4892a"
+        return obj.business.accent_color or "#d4892a"
 
 
 class RegisterSerializer(serializers.Serializer):

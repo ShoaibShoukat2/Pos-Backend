@@ -21,6 +21,8 @@ class BusinessSerializer(serializers.ModelSerializer):
             "postal_code",
             "tax_number",
             "logo",
+            "primary_color",
+            "accent_color",
             "timezone",
             "date_format",
             "fiscal_year_start_month",
