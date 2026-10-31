@@ -1,9 +1,11 @@
 from django.db import transaction
 from rest_framework import generics, viewsets
-from rest_framework.exceptions import ValidationError
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.exceptions import NotFound, ValidationError
+from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
 
-from apps.businesses.models import Branch, Currency, InvoiceSettings, TaxRate
+from apps.businesses.models import Branch, Business, Currency, InvoiceSettings, TaxRate
 from apps.businesses.serializers import (
     BranchSerializer,
     BusinessSerializer,
@@ -11,6 +13,7 @@ from apps.businesses.serializers import (
     InvoiceSettingsSerializer,
     TaxRateSerializer,
 )
+from apps.catalog.models import ProductVariant
 from apps.core.mixins import BusinessQuerysetMixin
 from apps.core.permissions import HasPermission
 
@@ -132,3 +135,100 @@ class InvoiceSettingsView(generics.RetrieveUpdateAPIView):
     def get_object(self):
         settings, _ = InvoiceSettings.objects.get_or_create(business=self.request.user.business)
         return settings
+
+
+# ── Public Price Checker ──────────────────────────────────────────────────────
+
+class PublicPriceCheckerInfoView(APIView):
+    """Returns shop branding for a given slug — no auth required."""
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def get(self, request, slug):
+        try:
+            business = Business.objects.get(price_checker_slug=slug, is_active=True)
+        except Business.DoesNotExist:
+            raise NotFound("Price checker not found.")
+        if not business.price_checker_enabled:
+            raise NotFound("Price checker is disabled for this shop.")
+
+        logo_url = ""
+        if business.logo:
+            try:
+                logo_url = request.build_absolute_uri(business.logo.url)
+            except ValueError:
+                logo_url = ""
+
+        return Response({
+            "name": business.name,
+            "legal_name": business.legal_name,
+            "city": business.city,
+            "logo": logo_url,
+            "primary_color": business.primary_color or "#1e293b",
+            "accent_color": business.accent_color or "#6366f1",
+        })
+
+
+class PublicPriceCheckerSearchView(APIView):
+    """Search products by barcode/SKU/name — no auth required."""
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def get(self, request, slug):
+        try:
+            business = Business.objects.get(price_checker_slug=slug, is_active=True)
+        except Business.DoesNotExist:
+            raise NotFound("Price checker not found.")
+        if not business.price_checker_enabled:
+            raise NotFound("Price checker is disabled for this shop.")
+
+        q = (request.query_params.get("q") or "").strip()
+        if not q:
+            return Response({"results": []})
+
+        from django.db.models import Q
+        qs = ProductVariant.objects.filter(
+            business=business,
+            is_active=True,
+            product__is_active=True,
+        ).select_related("product__category").order_by("product__name", "name")[:1]
+
+        # Exact barcode or SKU first
+        exact = ProductVariant.objects.filter(
+            business=business,
+            is_active=True,
+            product__is_active=True,
+        ).filter(
+            Q(barcode__iexact=q) | Q(sku__iexact=q) | Q(product__barcode__iexact=q)
+        ).select_related("product__category").first()
+
+        if exact:
+            items = [exact]
+        else:
+            items = list(
+                ProductVariant.objects.filter(
+                    business=business,
+                    is_active=True,
+                    product__is_active=True,
+                ).filter(
+                    Q(sku__icontains=q)
+                    | Q(barcode__icontains=q)
+                    | Q(name__icontains=q)
+                    | Q(product__name__icontains=q)
+                ).select_related("product__category").order_by("product__name")[:8]
+            )
+
+        results = []
+        for v in items:
+            results.append({
+                "id": str(v.id),
+                "product": v.product.name,
+                "variant": v.display_name,
+                "sku": v.sku,
+                "barcode": v.barcode or v.product.barcode,
+                "category": v.product.category.name if v.product.category_id else "",
+                "selling_price": f"{v.selling_price:.2f}",
+                "item_kind": v.product.item_kind,
+            })
+
+        return Response({"results": results})

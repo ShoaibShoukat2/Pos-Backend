@@ -1,4 +1,8 @@
+import re
+import uuid
+
 from django.db import models
+from django.utils.text import slugify
 
 from apps.core.models import BusinessScopedManager, TimeStampedModel
 
@@ -37,12 +41,30 @@ class Business(TimeStampedModel):
         default=BusinessType.GENERAL,
     )
     is_active = models.BooleanField(default=True)
+    # ── Public price checker ──────────────────────────────────────────────────
+    price_checker_enabled = models.BooleanField(default=False)
+    price_checker_slug = models.SlugField(
+        max_length=80, unique=True, blank=True,
+        help_text="URL slug for the public price checker, e.g. 'al-noor-traders'",
+    )
 
     class Meta:
         verbose_name_plural = "businesses"
 
     def __str__(self):
         return self.name
+
+    def save(self, *args, **kwargs):
+        # Auto-generate a unique slug from business name if not set
+        if not self.price_checker_slug:
+            from django.utils.text import slugify
+            import uuid as _uuid
+            base = slugify(self.name) or "shop"
+            slug = base[:60]
+            if Business.objects.filter(price_checker_slug=slug).exclude(pk=self.pk).exists():
+                slug = f"{base[:50]}-{_uuid.uuid4().hex[:6]}"
+            self.price_checker_slug = slug
+        super().save(*args, **kwargs)
 
 
 class Branch(TimeStampedModel):

@@ -28,6 +28,8 @@ class BusinessSerializer(serializers.ModelSerializer):
             "fiscal_year_start_month",
             "business_type",
             "is_active",
+            "price_checker_enabled",
+            "price_checker_slug",
             "created_at",
             "updated_at",
         )
