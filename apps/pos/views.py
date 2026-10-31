@@ -49,6 +49,9 @@ def _catalog_rows(variants, levels):
                 "duration_minutes": product.duration_minutes,
                 "warranty_days": product.warranty_days,
                 "qty": f"{levels.get(str(variant.id), 0):.3f}",
+                "pack_quantity": f"{variant.pack_quantity:.3f}" if variant.pack_quantity else "0",
+                "pack_price": f"{variant.pack_price:.2f}" if variant.pack_price else "0",
+                "pack_barcode": variant.pack_barcode or "",
             }
         )
     return catalog

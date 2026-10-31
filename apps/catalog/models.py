@@ -147,6 +147,21 @@ class ProductVariant(TimeStampedModel):
     cost_price = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     selling_price = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     min_stock = models.DecimalField(max_digits=14, decimal_places=3, default=0)
+    # ── Pack / Box pricing ────────────────────────────────────────────────────
+    # e.g. pack_quantity=10 means 1 box = 10 strips
+    # pack_price=450 means the full box sells for Rs 450 (cheaper than 10 × unit)
+    pack_quantity = models.DecimalField(
+        max_digits=14, decimal_places=3, default=0,
+        help_text="Units per box/pack. 0 = no pack pricing.",
+    )
+    pack_price = models.DecimalField(
+        max_digits=14, decimal_places=2, default=0,
+        help_text="Price for the full box/pack. 0 = no pack pricing.",
+    )
+    pack_barcode = models.CharField(
+        max_length=80, blank=True,
+        help_text="Barcode on the box (if different from unit barcode).",
+    )
     is_default = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
 
