@@ -28,6 +28,7 @@ urlpatterns = [
     path("api/", include("apps.promotions.urls")),
     path("api/", include("apps.pos.urls")),
     path("api/platform/", include("apps.platform.urls")),
+    path("api/", include("apps.showroom.urls")),
 ]
 
 if settings.DEBUG:

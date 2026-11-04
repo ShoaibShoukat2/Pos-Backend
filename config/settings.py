@@ -41,6 +41,7 @@ INSTALLED_APPS = [
     "apps.promotions.apps.PromotionsConfig",
     "apps.pos.apps.PosConfig",
     "apps.platform.apps.PlatformConfig",
+    "apps.showroom.apps.ShowroomConfig",
 ]
 
 MIDDLEWARE = [
