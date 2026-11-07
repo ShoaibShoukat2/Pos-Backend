@@ -8,13 +8,14 @@ from apps.core.models import BusinessScopedManager, TimeStampedModel
 
 
 class BusinessType(models.TextChoices):
-    GROCERY = "grocery", "Grocery"
-    CLOTHING = "clothing", "Clothing"
-    RESTAURANT = "restaurant", "Restaurant"
-    PHARMACY = "pharmacy", "Pharmacy"
+    GROCERY     = "grocery",     "Grocery"
+    CLOTHING    = "clothing",    "Clothing"
+    RESTAURANT  = "restaurant",  "Restaurant"
+    PHARMACY    = "pharmacy",    "Pharmacy"
     ELECTRONICS = "electronics", "Electronics"
-    PIZZA = "pizza", "Pizza shop"
-    GENERAL = "general", "General Retail"
+    PIZZA       = "pizza",       "Pizza shop"
+    GENERAL     = "general",     "General Retail"
+    CAR_SHOWROOM= "car_showroom","Car Showroom"
 
 
 class Business(TimeStampedModel):
