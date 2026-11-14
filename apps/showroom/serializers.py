@@ -20,6 +20,18 @@ def clean_signature(value):
     return value
 
 
+def clean_capture(value, label):
+    if not value:
+        return ""
+    if not isinstance(value, str) or not (
+        value.startswith("data:image/jpeg;base64,") or value.startswith("data:image/png;base64,")
+    ):
+        raise serializers.ValidationError(f"{label} must be a saved photo.")
+    if len(value) > 900_000:
+        raise serializers.ValidationError(f"{label} is too large. Capture it again.")
+    return value
+
+
 class CarBrandSerializer(serializers.ModelSerializer):
     class Meta:
         model = CarBrand
@@ -166,6 +178,7 @@ class CarSaleSerializer(serializers.ModelSerializer):
             "received_amount", "remaining_amount", "payment_method",
             "profit", "notes", "invoice_number", "signed", "signed_at",
             "customer_signature", "dealer_signature",
+            "customer_photo", "customer_thumbprint",
             "car_info", "customer_info", "payments", "created_at",
         )
         read_only_fields = ("id", "created_at", "invoice_number", "signed_at")
@@ -181,6 +194,12 @@ class CarSaleSerializer(serializers.ModelSerializer):
 
     def validate_dealer_signature(self, value):
         return clean_signature(value)
+
+    def validate_customer_photo(self, value):
+        return clean_capture(value, "Customer photo")
+
+    def validate_customer_thumbprint(self, value):
+        return clean_capture(value, "Thumb impression")
 
     def validate_car(self, car):
         if self.instance is None and car.status == "sold":
@@ -222,7 +241,11 @@ class CarSaleListSerializer(CarSaleSerializer):
     class Meta(CarSaleSerializer.Meta):
         fields = tuple(
             field for field in CarSaleSerializer.Meta.fields
-            if field not in ("customer_signature", "dealer_signature", "car_info", "customer_info", "payments")
+            if field not in (
+                "customer_signature", "dealer_signature",
+                "customer_photo", "customer_thumbprint",
+                "car_info", "customer_info", "payments",
+            )
         )
 
 
