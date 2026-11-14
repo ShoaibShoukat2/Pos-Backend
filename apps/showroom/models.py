@@ -180,11 +180,16 @@ class CarSale(TimeStampedModel):
     received_amount  = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     payment_method   = models.CharField(max_length=12, choices=PaymentMethod.choices, default=PaymentMethod.CASH)
     notes            = models.TextField(blank=True)
+    invoice_number   = models.CharField(max_length=20, null=True, blank=True)
+    customer_signature = models.TextField(blank=True)
+    dealer_signature   = models.TextField(blank=True)
+    signed_at        = models.DateTimeField(null=True, blank=True)
     created_by       = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
     objects          = BusinessScopedManager()
 
     class Meta:
         ordering = ["-sale_date", "-created_at"]
+        unique_together = ("business", "invoice_number")
 
     @property
     def final_amount(self):
@@ -200,6 +205,24 @@ class CarSale(TimeStampedModel):
         if not purchase:
             return self.final_amount
         return self.final_amount - purchase.total_cost
+
+    @property
+    def is_signed(self):
+        return bool(self.customer_signature or self.dealer_signature)
+
+
+class CarSalePayment(TimeStampedModel):
+    business       = models.ForeignKey("businesses.Business", on_delete=models.CASCADE, related_name="car_sale_payments")
+    sale           = models.ForeignKey(CarSale, on_delete=models.CASCADE, related_name="payments")
+    amount         = models.DecimalField(max_digits=14, decimal_places=2)
+    payment_date   = models.DateField()
+    payment_method = models.CharField(max_length=12, choices=CarSale.PaymentMethod.choices, default=CarSale.PaymentMethod.CASH)
+    notes          = models.CharField(max_length=200, blank=True)
+    created_by     = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
+    objects        = BusinessScopedManager()
+
+    class Meta:
+        ordering = ["payment_date", "created_at"]
 
 
 # ── Expenses ──────────────────────────────────────────────────────────────────
