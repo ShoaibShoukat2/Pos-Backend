@@ -177,8 +177,9 @@ class CarSaleSerializer(serializers.ModelSerializer):
             "sale_date", "selling_price", "discount", "final_amount",
             "received_amount", "remaining_amount", "payment_method",
             "profit", "notes", "invoice_number", "signed", "signed_at",
-            "customer_signature", "dealer_signature",
-            "customer_photo", "customer_thumbprint",
+            "customer_signature", "dealer_signature", "guarantor_signature",
+            "customer_photo", "customer_thumbprint", "guarantor_thumbprint",
+            "cnic_front", "cnic_back",
             "car_info", "customer_info", "payments", "created_at",
         )
         read_only_fields = ("id", "created_at", "invoice_number", "signed_at")
@@ -195,11 +196,23 @@ class CarSaleSerializer(serializers.ModelSerializer):
     def validate_dealer_signature(self, value):
         return clean_signature(value)
 
+    def validate_guarantor_signature(self, value):
+        return clean_signature(value)
+
     def validate_customer_photo(self, value):
         return clean_capture(value, "Customer photo")
 
     def validate_customer_thumbprint(self, value):
         return clean_capture(value, "Thumb impression")
+
+    def validate_guarantor_thumbprint(self, value):
+        return clean_capture(value, "Guarantor thumb")
+
+    def validate_cnic_front(self, value):
+        return clean_capture(value, "CNIC front")
+
+    def validate_cnic_back(self, value):
+        return clean_capture(value, "CNIC back")
 
     def validate_car(self, car):
         if self.instance is None and car.status == "sold":
@@ -229,7 +242,7 @@ class CarSaleSerializer(serializers.ModelSerializer):
         return sale
 
     def update(self, instance, validated):
-        touched_sig = "customer_signature" in validated or "dealer_signature" in validated
+        touched_sig = any(field in validated for field in ("customer_signature", "dealer_signature", "guarantor_signature"))
         sale = super().update(instance, validated)
         if touched_sig and sale.is_signed:
             sale.signed_at = timezone.now()
@@ -242,8 +255,9 @@ class CarSaleListSerializer(CarSaleSerializer):
         fields = tuple(
             field for field in CarSaleSerializer.Meta.fields
             if field not in (
-                "customer_signature", "dealer_signature",
-                "customer_photo", "customer_thumbprint",
+                "customer_signature", "dealer_signature", "guarantor_signature",
+                "customer_photo", "customer_thumbprint", "guarantor_thumbprint",
+                "cnic_front", "cnic_back",
                 "car_info", "customer_info", "payments",
             )
         )

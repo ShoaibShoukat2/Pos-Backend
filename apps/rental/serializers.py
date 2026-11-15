@@ -68,7 +68,8 @@ class CarRentalSerializer(serializers.ModelSerializer):
             "start_date", "end_date", "days", "daily_rate", "total_amount", "deposit",
             "received_amount", "balance", "payment_method", "notes", "invoice_number",
             "status", "signed", "signed_at",
-            "customer_photo", "customer_signature", "dealer_signature",
+            "customer_photo", "customer_signature", "dealer_signature", "guarantor_signature",
+            "customer_thumbprint", "guarantor_thumbprint", "cnic_front", "cnic_back",
             "created_at",
         )
         read_only_fields = ("id", "created_at", "invoice_number", "total_amount", "signed_at", "status")
@@ -79,8 +80,23 @@ class CarRentalSerializer(serializers.ModelSerializer):
     def validate_dealer_signature(self, value):
         return clean_signature(value)
 
+    def validate_guarantor_signature(self, value):
+        return clean_signature(value)
+
     def validate_customer_photo(self, value):
         return clean_capture(value, "Customer photo")
+
+    def validate_customer_thumbprint(self, value):
+        return clean_capture(value, "Renter thumb")
+
+    def validate_guarantor_thumbprint(self, value):
+        return clean_capture(value, "Guarantor thumb")
+
+    def validate_cnic_front(self, value):
+        return clean_capture(value, "CNIC front")
+
+    def validate_cnic_back(self, value):
+        return clean_capture(value, "CNIC back")
 
     def validate(self, attrs):
         start = attrs.get("start_date") or getattr(self.instance, "start_date", None)
@@ -110,7 +126,14 @@ class CarRentalSerializer(serializers.ModelSerializer):
         return rental
 
     def update(self, instance, validated):
-        touched = any(field in validated for field in ("customer_signature", "dealer_signature", "customer_photo"))
+        touched = any(
+            field in validated
+            for field in (
+                "customer_signature", "dealer_signature", "guarantor_signature",
+                "customer_photo", "customer_thumbprint", "guarantor_thumbprint",
+                "cnic_front", "cnic_back",
+            )
+        )
         rental = super().update(instance, validated)
         if touched and rental.is_signed and not rental.signed_at:
             rental.signed_at = timezone.now()
@@ -122,7 +145,10 @@ class CarRentalListSerializer(CarRentalSerializer):
     class Meta(CarRentalSerializer.Meta):
         fields = tuple(
             field for field in CarRentalSerializer.Meta.fields
-            if field not in ("customer_photo", "customer_signature", "dealer_signature")
+            if field not in (
+                "customer_photo", "customer_signature", "dealer_signature", "guarantor_signature",
+                "customer_thumbprint", "guarantor_thumbprint", "cnic_front", "cnic_back",
+            )
         )
 
 

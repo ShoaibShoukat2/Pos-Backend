@@ -1,3 +1,4 @@
+from datetime import date
 from decimal import Decimal
 
 from django.utils import timezone
@@ -61,6 +62,36 @@ class CarRentalViewSet(BusinessQuerysetMixin, viewsets.ModelViewSet):
         rental.save(update_fields=["status", "updated_at"])
         rental.car.status = RentalCar.Status.AVAILABLE
         rental.car.save(update_fields=["status"])
+        return Response(CarRentalSerializer(rental).data)
+
+    @action(detail=True, methods=["post"])
+    def extend(self, request, pk=None):
+        rental = self.get_object()
+        if rental.status != CarRental.Status.ACTIVE:
+            raise ValidationError({"detail": "This rental is already closed."})
+        try:
+            end = date.fromisoformat(str(request.data.get("end_date") or "")[:10])
+        except ValueError:
+            raise ValidationError({"end_date": "Choose the new return date."})
+        if end < rental.start_date:
+            raise ValidationError({"end_date": "Return date cannot be before the start date."})
+        days = max(1, (end - rental.start_date).days or 1)
+        rental.end_date = end
+        rental.total_amount = rental.daily_rate * days
+        rental.save(update_fields=["end_date", "total_amount", "updated_at"])
+        return Response(CarRentalSerializer(rental).data)
+
+    @action(detail=True, methods=["post"])
+    def pay(self, request, pk=None):
+        rental = self.get_object()
+        try:
+            amount = Decimal(str(request.data.get("amount") or "0"))
+        except Exception:
+            raise ValidationError({"amount": "Enter a valid amount."})
+        if amount <= ZERO:
+            raise ValidationError({"amount": "Enter an amount greater than zero."})
+        rental.received_amount = rental.received_amount + amount
+        rental.save(update_fields=["received_amount", "updated_at"])
         return Response(CarRentalSerializer(rental).data)
 
 

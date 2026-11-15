@@ -77,6 +77,11 @@ class CarRental(TimeStampedModel):
     customer_photo = models.TextField(blank=True)
     customer_signature = models.TextField(blank=True)
     dealer_signature = models.TextField(blank=True)
+    guarantor_signature = models.TextField(blank=True)
+    customer_thumbprint = models.TextField(blank=True)
+    guarantor_thumbprint = models.TextField(blank=True)
+    cnic_front = models.TextField(blank=True)
+    cnic_back = models.TextField(blank=True)
     signed_at = models.DateTimeField(null=True, blank=True)
     status = models.CharField(max_length=12, choices=Status.choices, default=Status.ACTIVE)
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
@@ -98,4 +103,4 @@ class CarRental(TimeStampedModel):
 
     @property
     def is_signed(self):
-        return bool(self.customer_signature or self.dealer_signature)
+        return bool(self.customer_signature or self.dealer_signature or self.guarantor_signature)
