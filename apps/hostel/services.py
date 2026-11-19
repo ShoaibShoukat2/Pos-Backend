@@ -847,6 +847,8 @@ def set_bed_status(actor, bed, status):
 def open_beds(actor, *, branch_id, check_in, check_out, room_id=None, floor=None):
     if not check_in or not check_out or check_in >= check_out:
         raise ValidationError({"check_out": "Choose a check-in and a later checkout."})
+    if actor["role"] != "owner":
+        branch_id = actor["branch_id"]
     qs = HostelBed.objects.filter(
         business=actor["business"],
         branch_id=branch_id,
@@ -854,8 +856,6 @@ def open_beds(actor, *, branch_id, check_in, check_out, room_id=None, floor=None
         room__status=HostelRoom.Status.ACTIVE,
         branch__status=HostelBranch.Status.ACTIVE,
     ).exclude(status__in=[HostelBed.Status.MAINTENANCE, HostelBed.Status.BLOCKED])
-    if actor["role"] != "owner" and str(branch_id) != str(actor["branch_id"]):
-        raise PermissionDenied("You can only work inside your assigned branch.")
     if room_id:
         qs = qs.filter(room_id=room_id)
     if floor:

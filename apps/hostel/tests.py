@@ -152,6 +152,12 @@ class HostelWorkflowTests(APITestCase):
             "branch": branch.data["id"], "role": "manager",
         }, format="json")
         self.assertEqual(created.status_code, 201, created.data)
+        other = self.client.post("/api/hostel/branches/", {"name": "Karachi", "code": "KHI3", "floors": 1}, format="json")
+        secret = self.client.post("/api/hostel/customers/", {
+            "full_name": "Other Branch Student", "mobile": "03009999999", "branch": other.data["id"],
+            "monthly_rent": "8000",
+        }, format="json")
+        self.assertEqual(secret.status_code, 201, secret.data)
         self.client.force_authenticate(User.objects.get(email="manager@hostel.test"))
         me = self.client.get("/api/hostel/me/")
         self.assertEqual(me.status_code, 200)
@@ -166,3 +172,13 @@ class HostelWorkflowTests(APITestCase):
         self.assertEqual(board.status_code, 200)
         self.assertTrue(board.data["show_finance"])
         self.assertIn("month_revenue", board.data["stats"])
+        hidden_branch = self.client.get(f"/api/hostel/branches/{other.data['id']}/")
+        self.assertEqual(hidden_branch.status_code, 404)
+        hidden_customer = self.client.get(f"/api/hostel/customers/{secret.data['id']}/")
+        self.assertEqual(hidden_customer.status_code, 404)
+        listed = self.client.get("/api/hostel/customers/")
+        self.assertEqual(listed.data["count"], 0)
+        names = [row["name"] for row in self.client.get("/api/hostel/branches/").data]
+        self.assertEqual(names, ["Lahore"])
+        search = self.client.get("/api/hostel/search/?q=Other")
+        self.assertEqual(search.data["customers"], [])
