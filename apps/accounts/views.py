@@ -11,6 +11,7 @@ from apps.accounts.models import Permission, Role
 from apps.accounts.helpers import is_cashier_user
 from apps.accounts.serializers import (
     CashierLoginSerializer,
+    HostelStaffLoginSerializer,
     ChangePasswordSerializer,
     CreateCashierSerializer,
     LoginSerializer,
@@ -68,6 +69,11 @@ class PlatformLoginView(TokenObtainPairView):
 class CashierLoginView(TokenObtainPairView):
     permission_classes = [AllowAny]
     serializer_class = CashierLoginSerializer
+
+
+class HostelStaffLoginView(TokenObtainPairView):
+    permission_classes = [AllowAny]
+    serializer_class = HostelStaffLoginSerializer
 
 
 class CashierCreateView(generics.CreateAPIView):

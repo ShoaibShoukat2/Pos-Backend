@@ -253,6 +253,7 @@ class LoginSerializer(TokenObtainPairSerializer):
     require_owner = False
     require_platform_admin = False
     require_cashier = False
+    require_hostel_staff = False
 
     @classmethod
     def get_token(cls, user):
@@ -289,9 +290,19 @@ class LoginSerializer(TokenObtainPairSerializer):
         if self.require_owner and not is_owner:
             from apps.hostel.access import is_active_hostel_staff
 
+            if is_active_hostel_staff(self.user):
+                raise serializers.ValidationError(
+                    "Use the Staff sign-in for hostel employees."
+                )
+            raise serializers.ValidationError(
+                "This portal is for business owners only."
+            )
+        if self.require_hostel_staff:
+            from apps.hostel.access import is_active_hostel_staff
+
             if not is_active_hostel_staff(self.user):
                 raise serializers.ValidationError(
-                    "This portal is for business owners only. Sign in from the staff page."
+                    "This sign-in is for hostel staff only. Owners use the Owner tab."
                 )
         if (
             not is_platform
@@ -317,6 +328,10 @@ class PlatformLoginSerializer(LoginSerializer):
 
 class CashierLoginSerializer(LoginSerializer):
     require_cashier = True
+
+
+class HostelStaffLoginSerializer(LoginSerializer):
+    require_hostel_staff = True
 
 
 class CreateCashierSerializer(serializers.Serializer):

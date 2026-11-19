@@ -129,13 +129,18 @@ class HostelWorkflowTests(APITestCase):
         self.assertEqual(HostelReservation.objects.get(pk=clash_a.data["id"]).status, HostelReservation.Status.COMPLETED)
         self.assertEqual(HostelCustomer.objects.get(pk=customer_id).bed_id, None)
 
-    def test_staff_can_sign_in_from_owner_portal(self):
+    def test_staff_sign_in_uses_staff_portal(self):
         branch = self.client.post("/api/hostel/branches/", {"name": "Lahore", "code": "LHR2", "floors": 1}, format="json")
         self.client.post("/api/hostel/employees/", {
             "full_name": "Bilal", "email": "bilal@hostel.test", "password": "staff-pass-1",
             "branch": branch.data["id"], "role": "manager", "can_view_reports": True, "can_approve_expenses": True,
         }, format="json")
         self.client.logout()
-        response = self.client.post("/api/auth/owner/login/", {"email": "bilal@hostel.test", "password": "staff-pass-1"}, format="json")
+        blocked = self.client.post("/api/auth/owner/login/", {"email": "bilal@hostel.test", "password": "staff-pass-1"}, format="json")
+        self.assertEqual(blocked.status_code, 400)
+        response = self.client.post("/api/auth/hostel/login/", {"email": "bilal@hostel.test", "password": "staff-pass-1"}, format="json")
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(response.data["user"]["is_owner"], False)
+        self.client.force_authenticate(self.owner)
+        owner_try = self.client.post("/api/auth/hostel/login/", {"email": self.owner.email, "password": "owner-pass-1"}, format="json")
+        self.assertEqual(owner_try.status_code, 400)
