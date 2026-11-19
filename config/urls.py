@@ -30,6 +30,7 @@ urlpatterns = [
     path("api/platform/", include("apps.platform.urls")),
     path("api/", include("apps.showroom.urls")),
     path("api/", include("apps.rental.urls")),
+    path("api/", include("apps.hostel.urls")),
 ]
 
 if settings.DEBUG:

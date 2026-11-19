@@ -17,6 +17,7 @@ class BusinessType(models.TextChoices):
     GENERAL     = "general",     "General Retail"
     CAR_SHOWROOM= "car_showroom","Car Showroom"
     RENT_A_CAR  = "rent_a_car",  "Rent a Car"
+    HOSTEL      = "hostel",     "Hostel"
 
 
 class Business(TimeStampedModel):

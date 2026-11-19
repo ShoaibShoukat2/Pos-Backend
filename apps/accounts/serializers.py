@@ -287,9 +287,12 @@ class LoginSerializer(TokenObtainPairSerializer):
                 "Use the cashier portal to sign in."
             )
         if self.require_owner and not is_owner:
-            raise serializers.ValidationError(
-                "This portal is for business owners only. Sign in from the staff page."
-            )
+            from apps.hostel.access import is_active_hostel_staff
+
+            if not is_active_hostel_staff(self.user):
+                raise serializers.ValidationError(
+                    "This portal is for business owners only. Sign in from the staff page."
+                )
         if (
             not is_platform
             and self.user.business_id

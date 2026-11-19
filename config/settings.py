@@ -43,6 +43,7 @@ INSTALLED_APPS = [
     "apps.platform.apps.PlatformConfig",
     "apps.showroom.apps.ShowroomConfig",
     "apps.rental.apps.RentalConfig",
+    "apps.hostel.apps.HostelConfig",
 ]
 
 MIDDLEWARE = [
