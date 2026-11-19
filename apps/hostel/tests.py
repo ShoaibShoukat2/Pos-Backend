@@ -144,3 +144,25 @@ class HostelWorkflowTests(APITestCase):
         self.client.force_authenticate(self.owner)
         owner_try = self.client.post("/api/auth/hostel/login/", {"email": self.owner.email, "password": "owner-pass-1"}, format="json")
         self.assertEqual(owner_try.status_code, 400)
+
+    def test_manager_can_run_the_hostel_desk(self):
+        branch = self.client.post("/api/hostel/branches/", {"name": "Lahore", "code": "LHR3", "floors": 1}, format="json")
+        created = self.client.post("/api/hostel/employees/", {
+            "full_name": "Hostel Manager", "email": "manager@hostel.test", "password": "staff-pass-1",
+            "branch": branch.data["id"], "role": "manager",
+        }, format="json")
+        self.assertEqual(created.status_code, 201, created.data)
+        self.client.force_authenticate(User.objects.get(email="manager@hostel.test"))
+        me = self.client.get("/api/hostel/me/")
+        self.assertEqual(me.status_code, 200)
+        codes = set(me.data["permissions"])
+        self.assertTrue({"customers.manage", "payments.collect", "reports.branch", "expenses.approve"} <= codes)
+        self.assertNotIn("payments.void", codes)
+        self.assertNotIn("settings.manage", codes)
+        self.assertNotIn("branches.manage", codes)
+        report = self.client.get("/api/hostel/reports/?type=collections")
+        self.assertEqual(report.status_code, 200)
+        board = self.client.get("/api/hostel/dashboard/")
+        self.assertEqual(board.status_code, 200)
+        self.assertTrue(board.data["show_finance"])
+        self.assertIn("month_revenue", board.data["stats"])

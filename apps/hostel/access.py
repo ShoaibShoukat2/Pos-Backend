@@ -82,6 +82,8 @@ def permission_codes(actor) -> set[str]:
             "staff.manage",
         }
     employee = actor["employee"]
+    if employee.role == HostelEmployee.Role.MANAGER:
+        return set(codes_for_employee(employee))
     return set(employee.permissions.values_list("codename", flat=True))
 
 
@@ -99,10 +101,6 @@ def ensure_perm(actor, code: str):
 def codes_for_employee(employee) -> list[str]:
     if employee.role == HostelEmployee.Role.MANAGER:
         codes = list(MANAGER_DEFAULT)
-        if not employee.can_approve_expenses:
-            codes = [code for code in codes if code != "expenses.approve"]
-        if not employee.can_view_reports:
-            codes = [code for code in codes if code != "reports.branch"]
         if employee.can_manage_staff:
             codes.append("staff.manage")
         return codes

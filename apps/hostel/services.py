@@ -1130,7 +1130,7 @@ def dashboard(actor, params):
         alerts.append({"kind": "due", "title": "Rent due soon", "body": f"{upcoming} bills are due within 5 days.", "href": "/hostel/payments"})
     checkout_soon = customers.filter(status=HostelCustomer.Status.ACTIVE, expected_checkout__gte=today, expected_checkout__lte=today + timedelta(days=7)).count()
     if checkout_soon:
-        alerts.append({"kind": "checkout", "title": "Upcoming checkouts", "body": f"{checkout_soon} guests leave within 7 days.", "href": "/hostel/stays"})
+        alerts.append({"kind": "leaving", "title": "Stays ending soon", "body": f"{checkout_soon} customers are due to leave within 7 days.", "href": "/hostel/customers"})
     pending_res = HostelReservation.objects.filter(business=business, status=HostelReservation.Status.PENDING)
     if branch_id:
         pending_res = pending_res.filter(branch_id=branch_id)
