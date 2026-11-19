@@ -463,7 +463,7 @@ class HostelEmployee(TimeStampedModel):
     employee_code = models.CharField(max_length=20)
     full_name = models.CharField(max_length=160)
     photo = models.TextField(blank=True)
-    email = models.EmailField()
+    email = models.EmailField(blank=True)
     phone = models.CharField(max_length=30, blank=True)
     designation = models.CharField(max_length=80, blank=True)
     salary = models.DecimalField(max_digits=12, decimal_places=2, default=0)

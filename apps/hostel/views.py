@@ -599,7 +599,12 @@ class EmployeeViewSet(HostelBase, viewsets.ModelViewSet):
         )
 
     def create(self, request, *args, **kwargs):
-        branch = HostelBranch.objects.get(pk=request.data.get("branch"), business=request.user.business, is_deleted=False)
+        if self.actor["role"] != "owner":
+            branch = HostelBranch.objects.get(pk=self.actor["branch_id"], business=request.user.business, is_deleted=False)
+        elif not request.data.get("branch"):
+            raise ValidationError({"branch": "Choose a branch."})
+        else:
+            branch = HostelBranch.objects.get(pk=request.data.get("branch"), business=request.user.business, is_deleted=False)
         payload = {
             "branch": branch,
             "full_name": request.data.get("full_name") or "",
@@ -637,6 +642,8 @@ class EmployeeViewSet(HostelBase, viewsets.ModelViewSet):
         self.require("staff.manage")
         if self.actor["employee"] and instance.pk == self.actor["employee"].pk:
             raise ValidationError({"detail": "You cannot remove your own account."})
+        if self.actor["role"] != "owner" and instance.role == HostelEmployee.Role.MANAGER:
+            raise PermissionDenied("Only the owner can remove a manager.")
         instance.is_deleted = True
         instance.status = HostelEmployee.Status.INACTIVE
         instance.save(update_fields=["is_deleted", "status", "updated_at"])

@@ -923,27 +923,32 @@ def create_employee(actor, payload):
             "can_manage_staff": False,
             "can_approve_expenses": False,
             "can_view_reports": False,
+            "branch": HostelBranch.objects.get(pk=actor["branch_id"]),
         }
-    branch = HostelBranch.objects.get(pk=payload["branch"].pk)
+    branch = payload["branch"]
     require_branch(actor, branch)
-    email = payload["email"].strip().lower()
-    if User.objects.filter(email__iexact=email).exists():
-        raise ValidationError({"email": "An account with this email already exists."})
+    email = (payload.get("email") or "").strip().lower()
     password = payload.get("password") or ""
-    parts = payload["full_name"].split(" ", 1)
-    user = User.objects.create_user(
-        email=email,
-        password=password or secrets.token_urlsafe(18),
-        first_name=parts[0][:80],
-        last_name=(parts[1] if len(parts) > 1 else "")[:80],
-        phone=payload.get("phone") or "",
-        business=actor["business"],
-        is_owner=False,
-    )
+    if password and not email:
+        raise ValidationError({"email": "Add an email if this person will sign in."})
+    user = None
+    if email:
+        if User.objects.filter(email__iexact=email).exists():
+            raise ValidationError({"email": "An account with this email already exists."})
+        parts = payload["full_name"].split(" ", 1)
+        user = User.objects.create_user(
+            email=email,
+            password=password or secrets.token_urlsafe(18),
+            first_name=parts[0][:80],
+            last_name=(parts[1] if len(parts) > 1 else "")[:80],
+            phone=payload.get("phone") or "",
+            business=actor["business"],
+            is_owner=False,
+        )
     invite_token = ""
     status = HostelEmployee.Status.ACTIVE
     invite_hash = ""
-    if not password:
+    if email and not password:
         user.set_unusable_password()
         user.save(update_fields=["password"])
         invite_token = secrets.token_urlsafe(24)

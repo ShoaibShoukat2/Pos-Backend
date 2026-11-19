@@ -101,8 +101,7 @@ def ensure_perm(actor, code: str):
 def codes_for_employee(employee) -> list[str]:
     if employee.role == HostelEmployee.Role.MANAGER:
         codes = list(MANAGER_DEFAULT)
-        if employee.can_manage_staff:
-            codes.append("staff.manage")
+        codes.append("staff.manage")
         return codes
     codes = list(EMPLOYEE_DEFAULT)
     if employee.can_view_reports:

@@ -4,7 +4,7 @@ from django.contrib.auth import get_user_model
 from rest_framework.test import APITestCase
 
 from apps.businesses.models import Business, BusinessType
-from apps.hostel.models import HostelBed, HostelCustomer, HostelPayment, HostelReservation
+from apps.hostel.models import HostelBed, HostelCustomer, HostelEmployee, HostelPayment, HostelReservation
 
 User = get_user_model()
 
@@ -182,3 +182,13 @@ class HostelWorkflowTests(APITestCase):
         self.assertEqual(names, ["Lahore"])
         search = self.client.get("/api/hostel/search/?q=Other")
         self.assertEqual(search.data["customers"], [])
+        self.assertIn("staff.manage", codes)
+        hired = self.client.post("/api/hostel/employees/", {
+            "full_name": "Ayesha Maid", "phone": "03005555555", "designation": "Maid",
+            "salary": "25000", "branch": other.data["id"],
+        }, format="json")
+        self.assertEqual(hired.status_code, 201, hired.data)
+        self.assertEqual(hired.data["branch_name"], "Lahore")
+        self.assertEqual(hired.data["designation"], "Maid")
+        self.assertEqual(hired.data["email"], "")
+        self.assertIsNone(HostelEmployee.objects.get(pk=hired.data["id"]).user_id)
