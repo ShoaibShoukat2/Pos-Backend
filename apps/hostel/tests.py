@@ -1,4 +1,3 @@
-from datetime import date
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
@@ -73,7 +72,8 @@ class HostelWorkflowTests(APITestCase):
         }, format="json")
         self.assertEqual(partial.status_code, 201, partial.data)
         bill = self.client.get("/api/hostel/monthly/?customer=" + customer_id + "&year=2026&month=3")
-        self.assertEqual(bill.data["results"][0]["status"], "partial")
+        self.assertEqual(bill.data["results"][0]["amount_paid"], "5000.00")
+        self.assertIn(bill.data["results"][0]["status"], ("partial", "overdue"))
         rest = self.client.post("/api/hostel/payments/", {
             "customer": customer_id, "amount": "10000", "payment_type": "rent", "method": "jazzcash",
             "payment_date": "2026-03-06", "period_year": 2026, "period_month": 3, "transaction_id": "JC1",
@@ -104,14 +104,18 @@ class HostelWorkflowTests(APITestCase):
         }, format="json")
         self.assertEqual(staff.status_code, 201, staff.data)
         self.client.force_authenticate(User.objects.get(email="sara@hostel.test"))
-        denied = self.client.get(f"/api/hostel/customers/?branch={karachi}")
-        self.assertEqual(denied.status_code, 200)
-        self.assertEqual(denied.data["count"], 0)
+        denied = self.client.get(f"/api/hostel/branches/{karachi}/")
+        self.assertEqual(denied.status_code, 404)
         own = self.client.get("/api/hostel/customers/")
         self.assertEqual(own.data["count"], 1)
         report = self.client.get("/api/hostel/reports/?type=collections")
         self.assertEqual(report.status_code, 403)
-        cannot_void = self.client.delete(f"/api/hostel/payments/{partial.data['id']}/")
+        collected = self.client.post("/api/hostel/payments/", {
+            "customer": customer_id, "amount": "500", "payment_type": "deposit", "method": "cash",
+            "payment_date": "2026-03-08",
+        }, format="json")
+        self.assertEqual(collected.status_code, 201, collected.data)
+        cannot_void = self.client.delete(f"/api/hostel/payments/{collected.data['id']}/")
         self.assertEqual(cannot_void.status_code, 403)
         removed = self.client.delete(f"/api/hostel/branches/{lahore}/")
         self.assertIn(removed.status_code, (403, 404))

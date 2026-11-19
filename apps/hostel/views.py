@@ -293,7 +293,7 @@ class CustomerViewSet(HostelBase, viewsets.ModelViewSet):
                 security_deposit=customer.security_deposit,
                 advance_payment=0,
             )
-            if check_in_now or (customer.check_in_date and customer.check_in_date <= timezone.localdate()):
+            if check_in_now and customer.check_in_date and customer.check_in_date <= timezone.localdate():
                 check_in(self.actor, reservation)
         customer = self.get_queryset().get(pk=customer.pk)
         return Response(CustomerDetailSerializer(customer).data, status=status.HTTP_201_CREATED)
@@ -359,6 +359,9 @@ class ReservationViewSet(HostelBase, viewsets.ModelViewSet):
         customer = self.request.query_params.get("customer")
         if customer:
             qs = qs.filter(customer_id=customer)
+        room = self.request.query_params.get("room")
+        if room:
+            qs = qs.filter(room_id=room)
         return qs
 
     def create(self, request, *args, **kwargs):
@@ -437,6 +440,8 @@ class PaymentViewSet(HostelBase, viewsets.ModelViewSet):
             qs = qs.filter(payment_date__gte=self.request.query_params["date_from"])
         if self.request.query_params.get("date_to"):
             qs = qs.filter(payment_date__lte=self.request.query_params["date_to"])
+        if self.request.query_params.get("room"):
+            qs = qs.filter(room_id=self.request.query_params["room"])
         if self.request.query_params.get("voided") != "1":
             qs = qs.filter(is_void=False)
         return qs
