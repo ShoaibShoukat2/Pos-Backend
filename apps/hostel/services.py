@@ -764,19 +764,25 @@ def change_room(actor, customer, bed, expected_checkout=None):
     same_customer(actor, customer)
     current = (
         HostelReservation.objects.select_for_update()
-        .filter(customer=customer, status=HostelReservation.Status.CHECKED_IN)
+        .filter(customer=customer, status__in=OPEN_BOOKINGS)
+        .order_by("-check_in_date")
         .first()
     )
     if current is None:
-        raise ValidationError({"detail": "Check the customer in before changing the room."})
+        raise ValidationError({"detail": "This member is not on a seat yet."})
     new_bed = HostelBed.objects.select_for_update().select_related("room", "branch").get(pk=bed.pk)
     require_branch(actor, new_bed.branch)
+    if new_bed.branch_id != current.branch_id:
+        raise ValidationError({"bed": "Shift the member inside the same branch."})
     end = expected_checkout or current.expected_checkout
     start = timezone.localdate()
     if start < current.check_in_date:
         start = current.check_in_date
+    if end <= start:
+        end = start + timedelta(days=30)
     assert_bed_free(new_bed, start, end)
     old_bed = HostelBed.objects.select_for_update().get(pk=current.bed_id)
+    previous_status = current.status
     current.status = HostelReservation.Status.COMPLETED
     current.save(update_fields=["status", "updated_at"])
     HostelCheckOut.objects.create(
@@ -786,7 +792,7 @@ def change_room(actor, customer, bed, expected_checkout=None):
         customer=customer,
         bed=old_bed,
         checked_out_at=timezone.now(),
-        notes="Moved to another seat",
+        notes="Shifted to another room",
         performed_by=actor["user"],
     )
     moved = HostelReservation.objects.create(
@@ -803,8 +809,8 @@ def change_room(actor, customer, bed, expected_checkout=None):
         security_deposit=current.security_deposit,
         advance_payment=ZERO,
         advance_posted=True,
-        instructions="Room change",
-        status=HostelReservation.Status.CHECKED_IN,
+        instructions="Room shift",
+        status=previous_status,
         created_by=actor["user"],
     )
     HostelCheckIn.objects.create(
@@ -814,7 +820,7 @@ def change_room(actor, customer, bed, expected_checkout=None):
         customer=customer,
         bed=new_bed,
         checked_in_at=timezone.now(),
-        notes="Room change",
+        notes="Room shift",
         performed_by=actor["user"],
     )
     customer.branch = new_bed.branch

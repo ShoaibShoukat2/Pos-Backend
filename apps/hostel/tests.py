@@ -1,3 +1,4 @@
+from datetime import date, timedelta
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
@@ -192,3 +193,24 @@ class HostelWorkflowTests(APITestCase):
         self.assertEqual(hired.data["designation"], "Maid")
         self.assertEqual(hired.data["email"], "")
         self.assertIsNone(HostelEmployee.objects.get(pk=hired.data["id"]).user_id)
+        today = date.today().isoformat()
+        later = (date.today() + timedelta(days=40)).isoformat()
+        first_room = self.client.post("/api/hostel/rooms/", {"branch": branch.data["id"], "number": "101", "floor": 1, "room_type": "double"}, format="json")
+        second_room = self.client.post("/api/hostel/rooms/", {"branch": branch.data["id"], "number": "102", "floor": 1, "room_type": "double"}, format="json")
+        self.assertEqual(first_room.status_code, 201, first_room.data)
+        self.assertEqual(first_room.data["available_beds"], 2)
+        member = self.client.post("/api/hostel/customers/", {
+            "full_name": "Sara Student", "mobile": "03007777777", "branch": branch.data["id"],
+            "bed_id": first_room.data["beds"][0]["id"], "check_in_now": True,
+            "check_in_date": today, "expected_checkout": later, "monthly_rent": "12000",
+        }, format="json")
+        self.assertEqual(member.status_code, 201, member.data)
+        moved = self.client.post(f"/api/hostel/customers/{member.data['id']}/change-room/", {"bed": second_room.data["beds"][0]["id"]}, format="json")
+        self.assertEqual(moved.status_code, 200, moved.data)
+        self.assertEqual(moved.data["room_number"], "102")
+        board = self.client.get("/api/hostel/rooms/")
+        by_number = {row["number"]: row for row in board.data}
+        self.assertEqual(by_number["101"]["available_beds"], 2)
+        self.assertEqual(by_number["102"]["available_beds"], 1)
+        seated = next(bed for bed in by_number["102"]["beds"] if bed["occupant"])
+        self.assertEqual(seated["occupant"]["name"], "Sara Student")

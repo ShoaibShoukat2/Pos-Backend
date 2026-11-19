@@ -59,6 +59,8 @@ class BedSerializer(serializers.ModelSerializer):
     def get_occupant(self, obj):
         stay = obj.reservations.filter(status="checked_in").select_related("customer").first()
         if stay is None:
+            stay = obj.reservations.filter(status__in=["confirmed", "pending"]).select_related("customer").first()
+        if stay is None:
             return None
         return {"id": str(stay.customer_id), "name": stay.customer.full_name, "reservation": str(stay.id)}
 
