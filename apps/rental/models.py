@@ -35,6 +35,19 @@ class RentalCar(TimeStampedModel):
         return " ".join(parts)
 
 
+class RentalTerms(TimeStampedModel):
+    business = models.OneToOneField("businesses.Business", on_delete=models.CASCADE, related_name="rental_terms")
+    title = models.CharField(max_length=160, blank=True)
+    clauses = models.JSONField(default=list, blank=True)
+    footer = models.CharField(max_length=120, blank=True, default="دستخط / انگوٹھا")
+
+    class Meta:
+        verbose_name = "rental terms"
+
+    def __str__(self):
+        return self.title or "شرائط"
+
+
 class RentalCustomer(TimeStampedModel):
     business = models.ForeignKey("businesses.Business", on_delete=models.CASCADE, related_name="rental_customers")
     name = models.CharField(max_length=160)

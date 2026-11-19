@@ -135,9 +135,18 @@ class CarRentalSerializer(serializers.ModelSerializer):
             )
         )
         rental = super().update(instance, validated)
+        days = max(1, (rental.end_date - rental.start_date).days or 1)
+        total = rental.daily_rate * days
+        updates = []
+        if rental.total_amount != total:
+            rental.total_amount = total
+            updates.append("total_amount")
         if touched and rental.is_signed and not rental.signed_at:
             rental.signed_at = timezone.now()
-            rental.save(update_fields=["signed_at"])
+            updates.append("signed_at")
+        if updates:
+            updates.append("updated_at")
+            rental.save(update_fields=updates)
         return rental
 
 

@@ -10,7 +10,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.core.mixins import BusinessQuerysetMixin
-from apps.rental.models import CarRental, RentalCar, RentalCustomer
+from apps.rental.models import CarRental, RentalCar, RentalCustomer, RentalTerms
 from apps.rental.serializers import (
     CarRentalListSerializer,
     CarRentalSerializer,
@@ -29,6 +29,13 @@ class RentalCarViewSet(BusinessQuerysetMixin, viewsets.ModelViewSet):
     pagination_class = None
     filterset_fields = ("status",)
     search_fields = ("brand", "model", "registration_number", "color")
+
+    def perform_destroy(self, instance):
+        if instance.rentals.filter(status=CarRental.Status.ACTIVE).exists():
+            raise ValidationError({"detail": "This car is on rent. Check it in before deleting it."})
+        if instance.rentals.exists():
+            raise ValidationError({"detail": "This car has rental history. Move it to workshop instead of deleting it."})
+        instance.delete()
 
 
 class RentalCustomerViewSet(BusinessQuerysetMixin, viewsets.ModelViewSet):
@@ -52,6 +59,14 @@ class CarRentalViewSet(BusinessQuerysetMixin, viewsets.ModelViewSet):
 
     def get_queryset(self):
         return super().get_queryset().select_related("car", "customer")
+
+    def perform_destroy(self, instance):
+        car = instance.car
+        was_active = instance.status == CarRental.Status.ACTIVE
+        instance.delete()
+        if was_active and not car.rentals.filter(status=CarRental.Status.ACTIVE).exists():
+            car.status = RentalCar.Status.AVAILABLE
+            car.save(update_fields=["status"])
 
     @action(detail=True, methods=["post"])
     def complete(self, request, pk=None):
@@ -93,6 +108,74 @@ class CarRentalViewSet(BusinessQuerysetMixin, viewsets.ModelViewSet):
         rental.received_amount = rental.received_amount + amount
         rental.save(update_fields=["received_amount", "updated_at"])
         return Response(CarRentalSerializer(rental).data)
+
+
+DEFAULT_CLAUSES = [
+    "میں جو گاڑی کرائے پر لے رہا ہوں میں نے اچھی طرح چیک کر لی ہے۔ اپنے استعمال کے دوران ہر قسم کے نقصان کا ذمہ دار ہوں اور تمام نقصان کی پوری رقم ادا کروں گا۔",
+    "خدا نخواستہ ایکسیڈنٹ یا کسی کے نقصان کی صورت میں گاڑی کا تمام کام خود کرواؤں گا اور روزانہ کا کرایہ پابندی و باقاعدگی سے ادا کروں گا۔ میں اس کا ذمہ دار ہوں، اور گاڑی جب تک کام کے لیے کھڑی رہے گی تب تک گاڑی کا کرایہ پورا ادا کروں گا۔",
+    "گاڑی چوری ہونے کی صورت میں جب تک دوسری گاڑی نہیں آ جاتی، میں اس کا روزانہ کرایہ ادا کرنے اور پوری گاڑی خریدنے (یا اس کی مکمل قیمت ادا کرنے) کا پابند ہوں گا۔",
+    "میں یہ وعدہ کرتا ہوں کہ گاڑی کے کسی پرزے کو نہیں بدلوں گا اور نہ ہی کسی دوسرے استعمال میں دوں گا۔",
+    "میں یہ وعدہ کرتا ہوں کہ گاڑی کے ذریعے کوئی غیر قانونی کام نہیں کروں گا، ایکسیڈنٹ یا کسی اور صورت میں پولیس کیس سے نمٹنے کی پوری ذمہ داری میری ہوگی۔",
+    "اگر گاڑی مقررہ وقت پر واپس نہ کی تو جب تک واپس کروں گا 500 روپے فی گھنٹہ ادا کروں گا۔",
+    "بغیر اجازت گاڑی کراچی سے باہر نہیں لے جاؤں گا، ورنہ کرایہ دگنا ادا کروں گا۔",
+    "گاڑی کی واپسی دن میں کی جائے گی۔ رات کے وقت سے لیٹ واپسی صبح 11:00 بجے تک ہوگی۔",
+    "گاڑی کی خوبصورتی بگڑنے، یا کراچی سے باہر جانے کی صورت میں چارجز دگنے کیے جائیں گے۔",
+    "گاڑی کرائے پر لیتے وقت بطور سیکورٹی گاڑی کی پوری مالیت کا چیک جمع کرواؤں گا، جو گاڑی کی بحفاظت واپسی پر واپس لے لوں گا۔",
+    "میں نے تمام شرائط پڑھ لی ہیں، مجھے منظور ہیں۔",
+]
+
+
+def clean_clauses(value):
+    if not isinstance(value, list):
+        raise ValidationError({"clauses": "Write each line on its own."})
+    rows = []
+    for item in value:
+        text = str(item or "").strip()
+        if not text:
+            continue
+        if len(text) > 800:
+            raise ValidationError({"clauses": "One line is too long."})
+        rows.append(text)
+    if not rows:
+        raise ValidationError({"clauses": "Keep at least one line on the sheet."})
+    if len(rows) > 40:
+        raise ValidationError({"clauses": "Keep the sheet to 40 lines."})
+    return rows
+
+
+class RentalTermsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        business = request.user.business
+        sheet = RentalTerms.objects.filter(business=business).first()
+        if sheet is None or not sheet.clauses:
+            return Response({
+                "title": (sheet.title if sheet and sheet.title else "") or business.name,
+                "clauses": DEFAULT_CLAUSES,
+                "footer": (sheet.footer if sheet and sheet.footer else "") or "دستخط / انگوٹھا",
+            })
+        return Response({
+            "title": sheet.title or business.name,
+            "clauses": sheet.clauses,
+            "footer": sheet.footer or "دستخط / انگوٹھا",
+        })
+
+    def put(self, request):
+        business = request.user.business
+        title = str(request.data.get("title") or "").strip()[:160]
+        footer = str(request.data.get("footer") or "").strip()[:120] or "دستخط / انگوٹھا"
+        clauses = clean_clauses(request.data.get("clauses"))
+        sheet, _created = RentalTerms.objects.get_or_create(business=business)
+        sheet.title = title
+        sheet.footer = footer
+        sheet.clauses = clauses
+        sheet.save()
+        return Response({
+            "title": sheet.title or business.name,
+            "clauses": sheet.clauses,
+            "footer": sheet.footer,
+        })
 
 
 class RentalDashboardView(APIView):
