@@ -152,6 +152,11 @@ class ProductListSerializer(serializers.ModelSerializer):
             "tax_rate",
             "sku",
             "barcode",
+            "generic_name",
+            "strength",
+            "dosage_form",
+            "batch_no",
+            "expiry_date",
             "cost_price",
             "selling_price",
             "min_stock",
@@ -177,6 +182,9 @@ class ProductSerializer(serializers.ModelSerializer):
     total_stock = serializers.DecimalField(max_digits=14, decimal_places=3, read_only=True, allow_null=True)
     variants = ProductVariantSerializer(many=True, required=False)
     opening_stock = serializers.ListField(child=serializers.DictField(), write_only=True, required=False)
+    pack_quantity = serializers.DecimalField(max_digits=14, decimal_places=3, required=False, write_only=True)
+    pack_price = serializers.DecimalField(max_digits=14, decimal_places=2, required=False, write_only=True)
+    pack_barcode = serializers.CharField(required=False, allow_blank=True, write_only=True)
 
     class Meta:
         model = Product
@@ -193,6 +201,11 @@ class ProductSerializer(serializers.ModelSerializer):
             "tax_rate",
             "sku",
             "barcode",
+            "generic_name",
+            "strength",
+            "dosage_form",
+            "batch_no",
+            "expiry_date",
             "cost_price",
             "selling_price",
             "min_stock",
@@ -206,6 +219,9 @@ class ProductSerializer(serializers.ModelSerializer):
             "total_stock",
             "variants",
             "opening_stock",
+            "pack_quantity",
+            "pack_price",
+            "pack_barcode",
             "created_at",
             "updated_at",
         )
@@ -244,7 +260,7 @@ class ProductSerializer(serializers.ModelSerializer):
             if kind == Product.ItemKind.SERVICE:
                 attrs["sku"] = _next_service_sku(self.context["request"].user.business)
             else:
-                raise serializers.ValidationError({"sku": "SKU is required."})
+                attrs["sku"] = _next_product_sku(self.context["request"].user.business)
         if not attrs.get("unit"):
             if self.instance:
                 attrs.pop("unit", None)
@@ -260,6 +276,7 @@ class ProductSerializer(serializers.ModelSerializer):
         request = self.context["request"]
         variants_data = validated.pop("variants", [])
         opening = validated.pop("opening_stock", [])
+        pack = _pop_pack(validated)
         validated.pop("business", None)
         product = Product.objects.create(business=request.user.business, **validated)
         if product.has_variants:
@@ -291,12 +308,14 @@ class ProductSerializer(serializers.ModelSerializer):
                 min_stock=product.min_stock,
                 is_default=True,
             )
+            _apply_pack(variant, pack)
             _apply_opening(variant, opening, request.user)
         return product
 
     def update(self, instance, validated):
         validated.pop("variants", None)
         validated.pop("opening_stock", None)
+        pack = _pop_pack(validated) if _pack_sent(self.initial_data) else None
         product = super().update(instance, validated)
         if not product.has_variants:
             default = product.variants.filter(is_default=True).first() or product.variants.first()
@@ -308,6 +327,8 @@ class ProductSerializer(serializers.ModelSerializer):
                 default.selling_price = product.selling_price
                 default.min_stock = product.min_stock
                 default.is_active = product.is_active
+                if pack:
+                    _apply_pack(default, pack, save=False)
                 default.save()
         return product
 
@@ -317,6 +338,43 @@ def _default_unit(business):
         Unit.objects.filter(business=business, short_code__iexact="pcs").first()
         or Unit.objects.filter(business=business).first()
     )
+
+
+def _pop_pack(validated):
+    return {
+        "pack_quantity": validated.pop("pack_quantity", None),
+        "pack_price": validated.pop("pack_price", None),
+        "pack_barcode": validated.pop("pack_barcode", None),
+    }
+
+
+def _pack_sent(data):
+    return any(key in data for key in ("pack_quantity", "pack_price", "pack_barcode"))
+
+
+def _apply_pack(variant, pack, save=True):
+    if not pack:
+        return
+    if pack["pack_quantity"] is not None:
+        variant.pack_quantity = pack["pack_quantity"] or 0
+    if pack["pack_price"] is not None:
+        variant.pack_price = pack["pack_price"] or 0
+    if pack["pack_barcode"] is not None:
+        variant.pack_barcode = pack["pack_barcode"] or ""
+    if save:
+        variant.save(update_fields=["pack_quantity", "pack_price", "pack_barcode"])
+
+
+def _next_product_sku(business):
+    n = Product.objects.filter(business=business, item_kind=Product.ItemKind.PRODUCT).count() + 1
+    while True:
+        sku = f"MED-{n:04d}"
+        taken = Product.objects.filter(business=business, sku__iexact=sku).exists()
+        if not taken:
+            taken = ProductVariant.objects.filter(business=business, sku__iexact=sku).exists()
+        if not taken:
+            return sku
+        n += 1
 
 
 def _next_service_sku(business):

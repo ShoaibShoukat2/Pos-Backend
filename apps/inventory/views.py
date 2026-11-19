@@ -1,4 +1,8 @@
-from django.db.models import Count, DecimalField, ExpressionWrapper, F, Q, Sum
+from datetime import timedelta
+
+from django.db.models import Count, DecimalField, ExpressionWrapper, F, Q, Sum, Value
+from django.db.models.functions import Coalesce
+from django.utils import timezone
 from rest_framework import mixins, viewsets
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -104,11 +108,23 @@ class InventorySummaryView(APIView):
             low_stock=Count("id", filter=Q(quantity__lt=F("variant__min_stock"))),
             sku_locations=Count("id"),
         )
+        from apps.catalog.models import Product
+
+        today = timezone.localdate()
+        qty = DecimalField(max_digits=14, decimal_places=3)
+        meds = Product.objects.filter(business=business, is_active=True, item_kind="product")
+        on_hand = Coalesce(Sum("variants__stock_levels__quantity"), Value(0, output_field=qty))
         return Response(
             {
                 "on_hand_qty": str(stats["on_hand"] or 0),
                 "stock_value": str(stats["stock_value"] or 0),
                 "low_stock": stats["low_stock"] or 0,
                 "sku_locations": stats["sku_locations"] or 0,
+                "medicines": meds.count(),
+                "out_of_stock": meds.annotate(on_hand=on_hand).filter(on_hand__lte=0).count(),
+                "expiring": meds.filter(
+                    expiry_date__isnull=False,
+                    expiry_date__lte=today + timedelta(days=90),
+                ).count(),
             }
         )

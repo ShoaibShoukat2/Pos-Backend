@@ -1,5 +1,8 @@
 from decimal import Decimal
 
+from datetime import timedelta
+
+from django.utils import timezone
 from django.db import transaction
 from django.db.models import Count, DecimalField, F, Prefetch, Q, Sum, Value
 from django.db.models.deletion import ProtectedError
@@ -80,7 +83,7 @@ class ProductViewSet(BusinessQuerysetMixin, viewsets.ModelViewSet):
     serializer_class = ProductSerializer
     permission_classes = [IsAuthenticated, HasPermission]
     queryset = Product.objects.all()
-    search_fields = ("name", "sku", "barcode", "variants__sku", "variants__barcode")
+    search_fields = ("name", "sku", "barcode", "generic_name", "batch_no", "variants__sku", "variants__barcode")
     filterset_fields = ("is_active", "category", "brand", "has_variants", "item_kind")
 
     @property
@@ -116,6 +119,15 @@ class ProductViewSet(BusinessQuerysetMixin, viewsets.ModelViewSet):
             )
         if self.action == "list" and "item_kind" not in self.request.query_params:
             qs = qs.filter(item_kind=Product.ItemKind.PRODUCT)
+        if self.action == "list":
+            flag = self.request.query_params.get
+            if flag("low_stock") in {"1", "true", "yes"}:
+                qs = qs.filter(total_stock__lt=F("min_stock"))
+            if flag("out") in {"1", "true", "yes"}:
+                qs = qs.filter(total_stock__lte=0)
+            if flag("expiring") in {"1", "true", "yes"}:
+                horizon = timezone.localdate() + timedelta(days=90)
+                qs = qs.filter(expiry_date__isnull=False, expiry_date__lte=horizon)
         return qs
 
     def perform_destroy(self, instance):
