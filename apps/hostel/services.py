@@ -603,7 +603,8 @@ def create_reservation(actor, *, customer, bed, reservation_date, check_in_date,
     )
     if customer.branch_id is None:
         customer.branch = bed.branch
-    customer.status = HostelCustomer.Status.RESERVED if customer.status != HostelCustomer.Status.ACTIVE else customer.status
+    if customer.bed_id is None:
+        customer.status = HostelCustomer.Status.RESERVED
     if not customer.monthly_rent:
         customer.monthly_rent = reservation.monthly_rent
     if not customer.security_deposit:
