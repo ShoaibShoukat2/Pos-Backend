@@ -84,6 +84,9 @@ class BedSerializer(serializers.ModelSerializer):
             "guardian_contact": customer.guardian_contact,
             "check_in_date": stay.check_in_date.isoformat() if stay.check_in_date else None,
             "expected_checkout": stay.expected_checkout.isoformat() if stay.expected_checkout else None,
+            "notice_given_on": customer.notice_given_on.isoformat() if customer.notice_given_on else None,
+            "notice_leave_on": customer.notice_leave_on.isoformat() if customer.notice_leave_on else None,
+            "notice_note": customer.notice_note,
             "monthly_rent": str(stay.monthly_rent or customer.monthly_rent or 0),
             "status": stay.status,
             "reservation": str(stay.id),
@@ -147,6 +150,7 @@ class CustomerListSerializer(serializers.ModelSerializer):
             "id", "full_name", "father_name", "mobile", "whatsapp", "email", "gender",
             "cnic", "branch", "branch_name", "room", "room_number", "floor", "bed", "seat",
             "admission_date", "check_in_date", "expected_checkout", "checkout_date",
+            "notice_given_on", "notice_leave_on", "notice_note",
             "monthly_rent", "security_deposit", "registration_fee", "status", "balance",
         )
 

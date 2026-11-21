@@ -6,6 +6,7 @@ from rest_framework.test import APITestCase
 
 from apps.businesses.models import Business, BusinessType
 from apps.hostel.models import HostelBed, HostelCustomer, HostelEmployee, HostelPayment, HostelReservation
+from apps.hostel.services import month_later
 
 User = get_user_model()
 
@@ -265,3 +266,35 @@ class HostelWorkflowTests(APITestCase):
         visible = [row["name"] for row in self.client.get("/api/hostel/branches/").data]
         self.assertEqual(visible, ["Islamabad"])
         self.assertEqual(self.client.get(f"/api/hostel/branches/{lahore.data['id']}/").status_code, 404)
+
+    def test_manager_records_one_month_notice(self):
+        branch = self.client.post("/api/hostel/branches/", {"name": "Lahore", "code": "LHRN", "floors": 1}, format="json")
+        self.client.post("/api/hostel/employees/", {
+            "full_name": "Notice Manager", "email": "notice@hostel.test", "password": "staff-pass-1",
+            "branch": branch.data["id"], "role": "manager",
+        }, format="json")
+        room = self.client.post("/api/hostel/rooms/", {
+            "branch": branch.data["id"], "number": "8", "floor": 1, "room_type": "single",
+        }, format="json")
+        today = date.today().isoformat()
+        later = (date.today() + timedelta(days=90)).isoformat()
+        member = self.client.post("/api/hostel/customers/", {
+            "full_name": "Leaving Student", "mobile": "03008888888", "branch": branch.data["id"],
+            "bed_id": room.data["beds"][0]["id"], "check_in_now": True,
+            "check_in_date": today, "expected_checkout": later, "monthly_rent": "10000",
+        }, format="json")
+        self.assertEqual(member.status_code, 201, member.data)
+        self.client.force_authenticate(User.objects.get(email="notice@hostel.test"))
+        noticed = self.client.post(f"/api/hostel/customers/{member.data['id']}/notice/", {"given_on": today, "note": "Going home"}, format="json")
+        self.assertEqual(noticed.status_code, 200, noticed.data)
+        self.assertEqual(noticed.data["notice_given_on"], today)
+        self.assertEqual(noticed.data["notice_leave_on"], month_later(date.today()).isoformat())
+        self.assertEqual(noticed.data["expected_checkout"], noticed.data["notice_leave_on"])
+        listed = self.client.get("/api/hostel/customers/?notice=1")
+        self.assertEqual(listed.data["count"], 1)
+        board = self.client.get("/api/hostel/rooms/")
+        person = board.data[0]["beds"][0]["occupant"]
+        self.assertEqual(person["notice_leave_on"], noticed.data["notice_leave_on"])
+        cleared = self.client.post(f"/api/hostel/customers/{member.data['id']}/notice/", {"cancel": True}, format="json")
+        self.assertEqual(cleared.status_code, 200, cleared.data)
+        self.assertIsNone(cleared.data["notice_given_on"])

@@ -58,12 +58,14 @@ from apps.hostel.services import (
     cancel_reservation,
     change_room,
     check_in,
+    cancel_notice,
     check_out,
     clean_images,
     create_employee,
     create_reservation,
     dashboard,
     extend_stay,
+    give_notice,
     generate_months,
     guard_delete_branch,
     handover_branch,
@@ -304,6 +306,8 @@ class CustomerViewSet(HostelBase, viewsets.ModelViewSet):
             qs = qs.filter(admission_date__gte=admission_from)
         if admission_to:
             qs = qs.filter(admission_date__lte=admission_to)
+        if self.request.query_params.get("notice") == "1":
+            qs = qs.filter(notice_given_on__isnull=False, status=HostelCustomer.Status.ACTIVE)
         return qs
 
     def create(self, request, *args, **kwargs):
@@ -387,6 +391,16 @@ class CustomerViewSet(HostelBase, viewsets.ModelViewSet):
             raise ValidationError({"detail": "This customer is not checked in."})
         reservation = check_out(self.actor, reservation, request.data.get("notes") or "")
         return Response(ReservationSerializer(reservation).data)
+
+    @action(detail=True, methods=["post"])
+    def notice(self, request, pk=None):
+        customer = self.get_object()
+        if request.data.get("cancel"):
+            customer = cancel_notice(self.actor, customer)
+        else:
+            given = request.data.get("given_on") or timezone.localdate().isoformat()
+            customer = give_notice(self.actor, customer, parse_date(given, "given_on"), request.data.get("note") or "")
+        return Response(CustomerDetailSerializer(self.get_queryset().get(pk=customer.pk)).data)
 
 
 class ReservationViewSet(HostelBase, viewsets.ModelViewSet):

@@ -165,6 +165,13 @@ def same_customer(actor, customer):
         raise PermissionDenied("You can only work inside your assigned branch.")
 
 
+def month_later(day):
+    year = day.year + (1 if day.month == 12 else 0)
+    month = 1 if day.month == 12 else day.month + 1
+    last = calendar.monthrange(year, month)[1]
+    return date(year, month, min(day.day, last))
+
+
 def month_end(year, month):
     return calendar.monthrange(year, month)[1]
 
@@ -733,6 +740,58 @@ def check_in(actor, reservation, notes=""):
 
 
 @transaction.atomic
+def give_notice(actor, customer, given_on, note=""):
+    ensure_perm(actor, "stays.manage")
+    same_customer(actor, customer)
+    reservation = (
+        HostelReservation.objects.select_for_update()
+        .select_related("room", "bed")
+        .filter(customer=customer, status=HostelReservation.Status.CHECKED_IN)
+        .first()
+    )
+    if reservation is None:
+        raise ValidationError({"detail": "Notice is recorded for a customer who is staying in a seat."})
+    if given_on > timezone.localdate():
+        raise ValidationError({"given_on": "The notice date cannot be in the future."})
+    leave_on = month_later(given_on)
+    if leave_on <= reservation.check_in_date:
+        raise ValidationError({"given_on": "The leaving date must be after check-in."})
+    customer.notice_given_on = given_on
+    customer.notice_leave_on = leave_on
+    customer.notice_note = (note or "").strip()[:400]
+    customer.expected_checkout = leave_on
+    customer.save(update_fields=["notice_given_on", "notice_leave_on", "notice_note", "expected_checkout", "updated_at"])
+    reservation.expected_checkout = leave_on
+    reservation.save(update_fields=["expected_checkout", "updated_at"])
+    seat = f"room {reservation.room.number} seat {reservation.bed.code}"
+    audit(
+        actor["business"], actor["user"], "notice.given",
+        f"{customer.full_name} gave notice for {seat}. Leaves {leave_on}.",
+        reservation.branch, "customer", customer.pk,
+    )
+    notify(
+        actor["business"], "notice", "Notice period",
+        f"{customer.full_name} leaves {seat} on {leave_on}.",
+        f"/hostel/customers/{customer.pk}", reservation.branch,
+    )
+    return customer
+
+
+@transaction.atomic
+def cancel_notice(actor, customer):
+    ensure_perm(actor, "stays.manage")
+    same_customer(actor, customer)
+    if customer.notice_given_on is None:
+        raise ValidationError({"detail": "This customer has not given notice."})
+    customer.notice_given_on = None
+    customer.notice_leave_on = None
+    customer.notice_note = ""
+    customer.save(update_fields=["notice_given_on", "notice_leave_on", "notice_note", "updated_at"])
+    audit(actor["business"], actor["user"], "notice.cancelled", f"{customer.full_name} notice was cancelled.", customer.branch, "customer", customer.pk)
+    return customer
+
+
+@transaction.atomic
 def check_out(actor, reservation, notes=""):
     ensure_perm(actor, "stays.manage")
     if reservation.status != HostelReservation.Status.CHECKED_IN:
@@ -1298,6 +1357,9 @@ def dashboard(actor, params):
     upcoming = bills.filter(status__in=[HostelMonthlyRent.Status.UNPAID, HostelMonthlyRent.Status.PARTIAL], due_date__gte=today, due_date__lte=soon).count()
     if upcoming:
         alerts.append({"kind": "due", "title": "Rent due soon", "body": f"{upcoming} bills are due within 5 days.", "href": "/hostel/payments"})
+    on_notice = customers.filter(status=HostelCustomer.Status.ACTIVE, notice_given_on__isnull=False).count()
+    if on_notice:
+        alerts.append({"kind": "notice", "title": "Notice period", "body": f"{on_notice} customers gave one month notice and will leave their seat.", "href": "/hostel/customers?notice=1"})
     checkout_soon = customers.filter(status=HostelCustomer.Status.ACTIVE, expected_checkout__gte=today, expected_checkout__lte=today + timedelta(days=7)).count()
     if checkout_soon:
         alerts.append({"kind": "leaving", "title": "Stays ending soon", "body": f"{checkout_soon} customers are due to leave within 7 days.", "href": "/hostel/customers"})
