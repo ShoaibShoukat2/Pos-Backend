@@ -71,7 +71,23 @@ class BedSerializer(serializers.ModelSerializer):
             stay = obj.reservations.filter(status__in=["confirmed", "pending"]).select_related("customer").first()
         if stay is None:
             return None
-        return {"id": str(stay.customer_id), "name": stay.customer.full_name, "reservation": str(stay.id)}
+        customer = stay.customer
+        return {
+            "id": str(customer.id),
+            "name": customer.full_name,
+            "phone": customer.mobile,
+            "whatsapp": customer.whatsapp,
+            "father_name": customer.father_name,
+            "cnic": customer.cnic,
+            "gender": customer.gender,
+            "guardian_name": customer.guardian_name,
+            "guardian_contact": customer.guardian_contact,
+            "check_in_date": stay.check_in_date.isoformat() if stay.check_in_date else None,
+            "expected_checkout": stay.expected_checkout.isoformat() if stay.expected_checkout else None,
+            "monthly_rent": str(stay.monthly_rent or customer.monthly_rent or 0),
+            "status": stay.status,
+            "reservation": str(stay.id),
+        }
 
     def get_monthly_rent(self, obj):
         return str(seat_price(obj))

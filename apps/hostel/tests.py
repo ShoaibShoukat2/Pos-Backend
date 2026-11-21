@@ -214,6 +214,8 @@ class HostelWorkflowTests(APITestCase):
         self.assertEqual(by_number["102"]["available_beds"], 1)
         seated = next(bed for bed in by_number["102"]["beds"] if bed["occupant"])
         self.assertEqual(seated["occupant"]["name"], "Sara Student")
+        self.assertEqual(seated["occupant"]["phone"], "03007777777")
+        self.assertEqual(seated["occupant"]["status"], "checked_in")
 
     def test_owner_can_hand_over_a_branch_and_manager_can_add_seats(self):
         karachi = self.client.post("/api/hostel/branches/", {"name": "Karachi", "code": "KHI9", "floors": 1}, format="json")
