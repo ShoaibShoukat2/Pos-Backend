@@ -33,6 +33,8 @@ def platform_overview(period: str = "month"):
     start = period_start(period)
     trend_start = timezone.now() - timedelta(days=13)
     businesses = Business.objects.all()
+    today = timezone.localdate()
+    live = Q(is_active=True) & (Q(subscription_ends_on__isnull=True) | Q(subscription_ends_on__gte=today))
     users = User.objects.filter(is_platform_admin=False)
     sales = Sale.objects.filter(status__in=OPEN_SALE_STATUSES)
     period_sales = sales.filter(created_at__gte=start)
@@ -53,8 +55,8 @@ def platform_overview(period: str = "month"):
         "period": period,
         "businesses": {
             "total": businesses.count(),
-            "active": businesses.filter(is_active=True).count(),
-            "inactive": businesses.filter(is_active=False).count(),
+            "active": businesses.filter(live).count(),
+            "inactive": businesses.exclude(live).count(),
             "new": businesses.filter(created_at__gte=start).count(),
         },
         "users": {
@@ -89,7 +91,8 @@ def platform_overview(period: str = "month"):
                 "name": row.name,
                 "business_type": row.business_type,
                 "city": row.city,
-                "is_active": row.is_active,
+                "is_active": row.is_active and (row.subscription_ends_on is None or row.subscription_ends_on >= timezone.localdate()),
+                "subscription_ends_on": row.subscription_ends_on.isoformat() if row.subscription_ends_on else None,
                 "created_at": row.created_at.isoformat(),
             }
             for row in recent

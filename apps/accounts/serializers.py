@@ -304,14 +304,11 @@ class LoginSerializer(TokenObtainPairSerializer):
                 raise serializers.ValidationError(
                     "This sign-in is for hostel staff only. Owners use the Owner tab."
                 )
-        if (
-            not is_platform
-            and self.user.business_id
-            and not self.user.business.is_active
-        ):
-            raise serializers.ValidationError(
-                "This business is disabled. Contact the platform administrator."
-            )
+        if not is_platform and self.user.business_id:
+            from apps.businesses.subscription import EXPIRED_MESSAGE, subscription_expired
+
+            if subscription_expired(self.user.business):
+                raise serializers.ValidationError({"detail": EXPIRED_MESSAGE})
         self.user.last_login = timezone.now()
         self.user.save(update_fields=["last_login"])
         data["user"] = MeSerializer(self.user).data

@@ -2,9 +2,14 @@ from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
-from rest_framework_simplejwt.views import TokenRefreshView
-
-from apps.accounts.views import CashierLoginView, HostelStaffLoginView, LoginView, OwnerLoginView, PlatformLoginView
+from apps.accounts.views import (
+    CashierLoginView,
+    HostelStaffLoginView,
+    LoginView,
+    OwnerLoginView,
+    PlatformLoginView,
+    SubscriptionTokenRefreshView,
+)
 from apps.core.views import AppUpdateView, HealthView
 
 urlpatterns = [
@@ -16,7 +21,7 @@ urlpatterns = [
     path("api/auth/platform/login/", PlatformLoginView.as_view(), name="platform_token_obtain_pair"),
     path("api/auth/cashier/login/", CashierLoginView.as_view(), name="cashier_token_obtain_pair"),
     path("api/auth/hostel/login/", HostelStaffLoginView.as_view(), name="hostel_staff_token_obtain_pair"),
-    path("api/auth/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
+    path("api/auth/refresh/", SubscriptionTokenRefreshView.as_view(), name="token_refresh"),
     path("api/auth/", include("apps.accounts.urls")),
     path("api/", include("apps.businesses.urls")),
     path("api/", include("apps.accounts.user_urls")),

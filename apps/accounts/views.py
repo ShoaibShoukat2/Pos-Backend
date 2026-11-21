@@ -2,10 +2,13 @@ from django.contrib.auth import get_user_model
 from django.db.models import Count
 from rest_framework import generics, status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
-from rest_framework_simplejwt.views import TokenObtainPairView
+from rest_framework_simplejwt.exceptions import TokenError
+from rest_framework_simplejwt.serializers import TokenRefreshSerializer
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from apps.accounts.models import Permission, Role
 from apps.accounts.helpers import is_cashier_user
@@ -74,6 +77,26 @@ class CashierLoginView(TokenObtainPairView):
 class HostelStaffLoginView(TokenObtainPairView):
     permission_classes = [AllowAny]
     serializer_class = HostelStaffLoginSerializer
+
+
+class SubscriptionTokenRefreshSerializer(TokenRefreshSerializer):
+    def validate(self, attrs):
+        try:
+            token = RefreshToken(attrs["refresh"])
+        except TokenError:
+            return super().validate(attrs)
+        user = User.objects.select_related("business").filter(pk=token.get("user_id")).first()
+        if user and not user.is_platform_admin and user.business_id:
+            from apps.businesses.subscription import EXPIRED_MESSAGE, subscription_expired
+
+            if subscription_expired(user.business):
+                raise AuthenticationFailed(EXPIRED_MESSAGE, code="subscription_expired")
+        return super().validate(attrs)
+
+
+class SubscriptionTokenRefreshView(TokenRefreshView):
+    permission_classes = [AllowAny]
+    serializer_class = SubscriptionTokenRefreshSerializer
 
 
 class CashierCreateView(generics.CreateAPIView):

@@ -44,6 +44,7 @@ class Business(TimeStampedModel):
         default=BusinessType.GENERAL,
     )
     is_active = models.BooleanField(default=True)
+    subscription_ends_on = models.DateField(null=True, blank=True)
     # ── Public price checker ──────────────────────────────────────────────────
     price_checker_enabled = models.BooleanField(default=False)
     price_checker_slug = models.SlugField(
@@ -58,6 +59,12 @@ class Business(TimeStampedModel):
         return self.name
 
     def save(self, *args, **kwargs):
+        if self._state.adding and self.subscription_ends_on is None:
+            from datetime import timedelta
+
+            from django.utils import timezone
+
+            self.subscription_ends_on = timezone.localdate() + timedelta(days=30)
         # Auto-generate a unique slug from business name if not set
         if not self.price_checker_slug:
             from django.utils.text import slugify
