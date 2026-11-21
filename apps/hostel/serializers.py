@@ -21,6 +21,16 @@ from apps.hostel.models import (
 from apps.hostel.services import clean_upload, finance_dict, money, seat_price
 
 
+def format_cnic(value):
+    text = (value or "").strip()
+    if not text:
+        return ""
+    digits = "".join(ch for ch in text if ch.isdigit())
+    if len(digits) != 13:
+        raise serializers.ValidationError("Enter 13 digits. It is saved as 35301-3263281-7.")
+    return f"{digits[:5]}-{digits[5:12]}-{digits[12]}"
+
+
 class BranchSerializer(serializers.ModelSerializer):
     total_rooms = serializers.IntegerField(read_only=True)
     total_seats = serializers.IntegerField(read_only=True)
@@ -405,7 +415,15 @@ class CustomerWriteSerializer(serializers.ModelSerializer):
             "admission_date", "check_in_date", "expected_checkout", "monthly_rent",
             "security_deposit", "registration_fee", "status", "notes", "bed_id", "check_in_now",
         )
-        extra_kwargs = {"branch": {"required": False, "allow_null": True}}
+        extra_kwargs = {
+            "branch": {"required": False, "allow_null": True},
+            "cnic": {"required": False, "allow_blank": True},
+            "cnic_front": {"required": False, "allow_blank": True},
+            "cnic_back": {"required": False, "allow_blank": True},
+        }
+
+    def validate_cnic(self, value):
+        return format_cnic(value)
 
     def validate_photo(self, value):
         return clean_upload(value, label="photo")
