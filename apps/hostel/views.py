@@ -11,7 +11,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.core.mixins import BusinessQuerysetMixin
-from apps.hostel.access import actor_context, ensure_perm, permission_codes
+from apps.hostel.access import actor_context, can_view_room_sheet, ensure_perm, permission_codes
 from apps.hostel.models import (
     HostelAuditLog,
     HostelBed,
@@ -203,6 +203,13 @@ class RoomViewSet(HostelBase, viewsets.ModelViewSet):
             require_branch(self.actor, serializer.validated_data["branch"])
         room = serializer.save()
         sync_room_beds(room)
+
+    @action(detail=True, methods=["get"], url_path="sheet")
+    def sheet(self, request, pk=None):
+        room = self.get_object()
+        if not can_view_room_sheet(self.actor, room.branch):
+            raise PermissionDenied("Only this branch manager can see who is staying in this room.")
+        return Response(RoomSerializer(room, context=self.get_serializer_context()).data)
 
     @action(detail=True, methods=["post"], url_path="seats")
     def add_seats(self, request, pk=None):

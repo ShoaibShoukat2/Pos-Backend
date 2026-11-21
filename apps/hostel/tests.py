@@ -298,3 +298,67 @@ class HostelWorkflowTests(APITestCase):
         cleared = self.client.post(f"/api/hostel/customers/{member.data['id']}/notice/", {"cancel": True}, format="json")
         self.assertEqual(cleared.status_code, 200, cleared.data)
         self.assertIsNone(cleared.data["notice_given_on"])
+
+    def test_scanned_room_details_are_only_for_the_branch_manager(self):
+        branch = self.client.post("/api/hostel/branches/", {"name": "Lahore", "code": "LHRS", "floors": 1}, format="json")
+        other = self.client.post("/api/hostel/branches/", {"name": "Karachi", "code": "KHIS", "floors": 1}, format="json")
+        room = self.client.post("/api/hostel/rooms/", {
+            "branch": branch.data["id"], "number": "3", "floor": 1, "room_type": "single",
+        }, format="json")
+        today = date.today().isoformat()
+        later = (date.today() + timedelta(days=30)).isoformat()
+        guest = self.client.post("/api/hostel/customers/", {
+            "full_name": "Scan Guest", "mobile": "03006666666", "cnic": "35301-3263281-7",
+            "branch": branch.data["id"], "bed_id": room.data["beds"][0]["id"], "check_in_now": True,
+            "check_in_date": today, "expected_checkout": later, "monthly_rent": "8000",
+        }, format="json")
+        self.assertEqual(guest.status_code, 201, guest.data)
+        staff = self.client.post("/api/hostel/employees/", {
+            "full_name": "Warden", "email": "warden-scan@hostel.test", "password": "staff-pass-1",
+            "branch": branch.data["id"], "role": "employee",
+        }, format="json")
+        self.assertEqual(staff.status_code, 201, staff.data)
+        handed = self.client.post(f"/api/hostel/branches/{branch.data['id']}/handover/", {
+            "full_name": "Scan Manager", "email": "scan-manager@hostel.test", "password": "staff-pass-1",
+        }, format="json")
+        self.assertEqual(handed.status_code, 200, handed.data)
+        outsider = self.client.post(f"/api/hostel/branches/{other.data['id']}/handover/", {
+            "full_name": "Other Manager", "email": "other-scan@hostel.test", "password": "staff-pass-1",
+        }, format="json")
+        self.assertEqual(outsider.status_code, 200, outsider.data)
+        sheet = f"/api/hostel/rooms/{room.data['id']}/sheet/"
+
+        self.client.force_authenticate(user=None)
+        anonymous = self.client.get(sheet)
+        self.assertEqual(anonymous.status_code, 401)
+        self.assertNotIn(b"Scan Guest", anonymous.content)
+
+        self.client.force_authenticate(User.objects.get(email="warden-scan@hostel.test"))
+        denied = self.client.get(sheet)
+        self.assertEqual(denied.status_code, 403)
+        self.assertNotIn(b"Scan Guest", denied.content)
+        self.assertNotIn(b"03006666666", denied.content)
+        opened = self.client.get(f"/api/hostel/rooms/{room.data['id']}/")
+        self.assertEqual(opened.status_code, 200)
+        hidden = opened.data["beds"][0]["occupant"]
+        self.assertTrue(hidden["restricted"])
+        self.assertNotIn("name", hidden)
+        self.assertNotIn("phone", hidden)
+
+        self.client.force_authenticate(User.objects.get(email="other-scan@hostel.test"))
+        foreign = self.client.get(sheet)
+        self.assertEqual(foreign.status_code, 404)
+        self.assertNotIn(b"Scan Guest", foreign.content)
+
+        self.client.force_authenticate(self.retail)
+        retail = self.client.get(sheet)
+        self.assertEqual(retail.status_code, 403)
+        self.assertNotIn(b"Scan Guest", retail.content)
+
+        self.client.force_authenticate(User.objects.get(email="scan-manager@hostel.test"))
+        allowed = self.client.get(sheet)
+        self.assertEqual(allowed.status_code, 200, allowed.data)
+        self.assertEqual(allowed.data["number"], "3")
+        self.assertEqual(allowed.data["beds"][0]["occupant"]["name"], "Scan Guest")
+        self.assertEqual(allowed.data["beds"][0]["occupant"]["phone"], "03006666666")
+        self.assertEqual(allowed.data["beds"][0]["occupant"]["cnic"], "35301-3263281-7")

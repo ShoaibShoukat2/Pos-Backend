@@ -18,6 +18,7 @@ from apps.hostel.models import (
     HostelRoom,
     HostelSettings,
 )
+from apps.hostel.access import can_view_room_sheet
 from apps.hostel.services import clean_upload, finance_dict, money, seat_price
 
 
@@ -83,7 +84,11 @@ class BedSerializer(serializers.ModelSerializer):
             return None
         customer = stay.customer
         view = self.context.get("view")
-        detail = getattr(view, "action", "") == "retrieve"
+        action = getattr(view, "action", "")
+        actor = getattr(view, "actor", None)
+        if action != "list" and not can_view_room_sheet(actor, obj.branch):
+            return {"restricted": True, "status": stay.status}
+        detail = action in {"retrieve", "sheet"}
         payload = {
             "id": str(customer.id),
             "name": customer.full_name,

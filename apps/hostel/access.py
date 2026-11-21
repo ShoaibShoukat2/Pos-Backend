@@ -98,6 +98,22 @@ def ensure_perm(actor, code: str):
         raise PermissionDenied("You do not have permission for this action.")
 
 
+def can_view_room_sheet(actor, branch) -> bool:
+    """Guest details on a scanned room are for that branch's manager, and the owner."""
+    if not actor or branch is None:
+        return False
+    if actor["role"] == "owner":
+        return actor["business"].id == branch.business_id
+    employee = actor.get("employee")
+    if employee is None or employee.role != HostelEmployee.Role.MANAGER:
+        return False
+    if employee.branch_id != branch.id:
+        return False
+    if branch.manager_id and branch.manager_id != employee.id:
+        return False
+    return True
+
+
 def codes_for_employee(employee) -> list[str]:
     if employee.role == HostelEmployee.Role.MANAGER:
         codes = list(MANAGER_DEFAULT)
