@@ -260,6 +260,46 @@ def capacity_for(room_type, capacity):
     return count
 
 
+def seat_price(bed):
+    if bed.furnishing == HostelBed.Furnishing.MATTRESS:
+        return money(bed.room.mattress_rent)
+    return money(bed.room.monthly_rent)
+
+
+def _fixed_capacity():
+    return {
+        HostelRoom.RoomType.SINGLE: 1,
+        HostelRoom.RoomType.DOUBLE: 2,
+        HostelRoom.RoomType.TRIPLE: 3,
+        HostelRoom.RoomType.FOUR: 4,
+        HostelRoom.RoomType.SIX: 6,
+    }
+
+
+def apply_seat_mix(room, bed_seats=None, mattress_seats=None):
+    if bed_seats is None and mattress_seats is None:
+        sync_room_beds(room)
+        return room
+    bed_count = int(bed_seats or 0)
+    mattress_count = int(mattress_seats or 0)
+    total = bed_count + mattress_count
+    if bed_count < 0 or mattress_count < 0 or total < 1 or total > 30:
+        raise ValidationError({"bed_seats": "Use 1 to 30 seats in total. Split them between bed and mattress."})
+    fixed = _fixed_capacity()
+    if room.room_type not in fixed or fixed[room.room_type] != total:
+        room.room_type = HostelRoom.RoomType.CUSTOM
+    room.capacity = total
+    room.save(update_fields=["room_type", "capacity", "updated_at"])
+    sync_room_beds(room)
+    ordered = sorted(room.beds.all(), key=lambda bed: (int(bed.code) if str(bed.code).isdigit() else 999, bed.code))
+    for index, bed in enumerate(ordered):
+        furnishing = HostelBed.Furnishing.BED if index < bed_count else HostelBed.Furnishing.MATTRESS
+        if bed.furnishing != furnishing:
+            bed.furnishing = furnishing
+            bed.save(update_fields=["furnishing", "updated_at"])
+    return room
+
+
 def sync_room_beds(room):
     wanted = capacity_for(room.room_type, room.capacity)
     room.capacity = wanted
@@ -594,7 +634,7 @@ def create_reservation(actor, *, customer, bed, reservation_date, check_in_date,
         reservation_date=reservation_date or timezone.localdate(),
         check_in_date=check_in_date,
         expected_checkout=expected_checkout,
-        monthly_rent=money(monthly_rent if monthly_rent is not None else bed.room.monthly_rent),
+        monthly_rent=money(seat_price(bed) if monthly_rent in (None, "") else monthly_rent),
         security_deposit=money(security_deposit if security_deposit is not None else bed.room.security_deposit),
         advance_payment=money(advance_payment or 0),
         instructions=instructions or "",
@@ -782,6 +822,8 @@ def change_room(actor, customer, bed, expected_checkout=None):
         end = start + timedelta(days=30)
     assert_bed_free(new_bed, start, end)
     old_bed = HostelBed.objects.select_for_update().get(pk=current.bed_id)
+    shifted_rent = seat_price(new_bed)
+    next_rent = shifted_rent if shifted_rent > ZERO else current.monthly_rent
     previous_status = current.status
     current.status = HostelReservation.Status.COMPLETED
     current.save(update_fields=["status", "updated_at"])
@@ -805,7 +847,7 @@ def change_room(actor, customer, bed, expected_checkout=None):
         reservation_date=timezone.localdate(),
         check_in_date=start,
         expected_checkout=end,
-        monthly_rent=current.monthly_rent,
+        monthly_rent=next_rent,
         security_deposit=current.security_deposit,
         advance_payment=ZERO,
         advance_posted=True,
@@ -828,6 +870,8 @@ def change_room(actor, customer, bed, expected_checkout=None):
     customer.bed = new_bed
     customer.expected_checkout = end
     customer.status = HostelCustomer.Status.ACTIVE
+    if shifted_rent > ZERO:
+        customer.monthly_rent = shifted_rent
     customer.save()
     sync_bed(old_bed)
     sync_bed(new_bed)
@@ -910,6 +954,121 @@ def finance_dict(customer):
     for key in ("total_payable", "total_paid", "remaining", "credit", "deposit_paid", "registration_paid", "last_amount"):
         data[key] = str(data[key])
     return data
+
+
+@transaction.atomic
+def add_room_seats(actor, room, count, furnishing, price=None):
+    ensure_perm(actor, "rooms.manage")
+    require_branch(actor, room.branch)
+    try:
+        count = int(count)
+    except (TypeError, ValueError):
+        raise ValidationError({"count": "Enter how many seats to add."}) from None
+    if count < 1 or count > 20:
+        raise ValidationError({"count": "Add 1 to 20 seats at a time."})
+    if furnishing not in (HostelBed.Furnishing.BED, HostelBed.Furnishing.MATTRESS):
+        raise ValidationError({"furnishing": "Choose bed or mattress."})
+    room = HostelRoom.objects.select_for_update().get(pk=room.pk)
+    if room.beds.count() + count > 30:
+        raise ValidationError({"count": "A room can have up to 30 seats."})
+    if price not in (None, ""):
+        amount = money(price)
+        if furnishing == HostelBed.Furnishing.MATTRESS:
+            room.mattress_rent = amount
+        else:
+            room.monthly_rent = amount
+    room.capacity = room.beds.count() + count
+    if room.room_type in _fixed_capacity() and _fixed_capacity()[room.room_type] != room.capacity:
+        room.room_type = HostelRoom.RoomType.CUSTOM
+    room.save(update_fields=["capacity", "room_type", "monthly_rent", "mattress_rent", "updated_at"])
+    before = set(room.beds.values_list("pk", flat=True))
+    sync_room_beds(room)
+    HostelBed.objects.filter(room=room).exclude(pk__in=before).update(furnishing=furnishing)
+    kind = "mattress" if furnishing == HostelBed.Furnishing.MATTRESS else "bed"
+    audit(
+        actor["business"], actor["user"], "seats.added",
+        f"Added {count} {kind} seat(s) in room {room.number}",
+        room.branch, "room", room.pk,
+    )
+    return room
+
+
+def set_bed_furnishing(actor, bed, furnishing):
+    ensure_perm(actor, "seats.manage")
+    require_branch(actor, bed.branch)
+    if furnishing not in (HostelBed.Furnishing.BED, HostelBed.Furnishing.MATTRESS):
+        raise ValidationError({"furnishing": "Choose bed or mattress."})
+    if bed.reservations.filter(status__in=OPEN_BOOKINGS).exists():
+        raise ValidationError({"furnishing": "This seat is already assigned. Change it after the guest leaves."})
+    bed.furnishing = furnishing
+    bed.save(update_fields=["furnishing", "updated_at"])
+    kind = "mattress" if furnishing == HostelBed.Furnishing.MATTRESS else "bed"
+    audit(
+        actor["business"], actor["user"], "seat.furnishing",
+        f"Room {bed.room.number} seat {bed.code} is now a {kind}",
+        bed.branch, "bed", bed.pk,
+    )
+    return bed
+
+
+@transaction.atomic
+def handover_branch(actor, branch, *, employee_id=None, full_name="", email="", phone="", password=""):
+    ensure_perm(actor, "branches.manage")
+    if actor["role"] != "owner":
+        raise PermissionDenied("Only the owner can hand a branch to a manager.")
+    branch = HostelBranch.objects.select_for_update().get(pk=branch.pk, business=actor["business"], is_deleted=False)
+    token = ""
+    if employee_id:
+        employee = (
+            HostelEmployee.objects.select_for_update()
+            .filter(pk=employee_id, business=actor["business"], is_deleted=False)
+            .first()
+        )
+        if employee is None:
+            raise ValidationError({"employee": "Choose a manager from this hostel."})
+        if employee.role != HostelEmployee.Role.MANAGER:
+            raise ValidationError({"employee": "Hand the branch to a manager, not a regular employee."})
+        if employee.status == HostelEmployee.Status.INACTIVE:
+            raise ValidationError({"employee": "This manager is inactive."})
+        if not employee.user_id:
+            raise ValidationError({"employee": "This manager has no sign-in. Add an email and password first."})
+    else:
+        full_name = (full_name or "").strip()
+        email = (email or "").strip().lower()
+        if not full_name:
+            raise ValidationError({"full_name": "Enter the manager name."})
+        if not email:
+            raise ValidationError({"email": "Add an email so this manager can sign in."})
+        employee, token = create_employee(actor, {
+            "branch": branch,
+            "full_name": full_name,
+            "email": email,
+            "phone": phone or "",
+            "password": password or "",
+            "role": HostelEmployee.Role.MANAGER,
+            "designation": "Branch manager",
+            "salary": 0,
+            "joining_date": timezone.localdate(),
+            "can_manage_staff": True,
+            "can_approve_expenses": True,
+            "can_view_reports": True,
+        })
+    previous = employee.branch
+    HostelBranch.objects.filter(manager=employee).exclude(pk=branch.pk).update(manager=None)
+    if employee.branch_id != branch.id:
+        employee.branch = branch
+        employee.save(update_fields=["branch", "updated_at"])
+    branch.manager = employee
+    branch.manager_name = employee.full_name
+    branch.save(update_fields=["manager", "manager_name", "updated_at"])
+    moved = f" Moved from {previous.name}." if previous and previous.id != branch.id else ""
+    audit(
+        actor["business"], actor["user"], "branch.handover",
+        f"{branch.name} handed to {employee.full_name}.{moved}"[:255],
+        branch, "branch", branch.pk,
+    )
+    notify(actor["business"], "branch", "Branch handed over", f"{employee.full_name} can now run {branch.name}.", "/hostel", branch)
+    return employee, token
 
 
 def assign_permissions(employee):

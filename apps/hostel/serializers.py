@@ -18,7 +18,7 @@ from apps.hostel.models import (
     HostelRoom,
     HostelSettings,
 )
-from apps.hostel.services import clean_upload, finance_dict, money
+from apps.hostel.services import clean_upload, finance_dict, money, seat_price
 
 
 class BranchSerializer(serializers.ModelSerializer):
@@ -28,15 +28,18 @@ class BranchSerializer(serializers.ModelSerializer):
     occupied_seats = serializers.IntegerField(read_only=True)
     reserved_seats = serializers.IntegerField(read_only=True)
     image = serializers.CharField(required=False, allow_blank=True)
+    manager_email = serializers.SerializerMethodField()
 
     class Meta:
         model = HostelBranch
         fields = (
             "id", "name", "code", "address", "city", "phone", "email", "manager_name",
+            "manager", "manager_email",
             "floors", "monthly_rent", "security_deposit", "opening_date", "status", "image",
             "total_rooms", "total_seats", "available_seats", "occupied_seats", "reserved_seats",
             "created_at",
         )
+        read_only_fields = ("manager",)
 
     def validate_image(self, value):
         return clean_upload(value, label="image")
@@ -44,17 +47,23 @@ class BranchSerializer(serializers.ModelSerializer):
     def validate_code(self, value):
         return value.strip().upper()
 
+    def get_manager_email(self, obj):
+        manager = getattr(obj, "manager", None)
+        if manager is None or manager.is_deleted:
+            return ""
+        return manager.email or ""
+
 
 class BedSerializer(serializers.ModelSerializer):
     room_number = serializers.CharField(source="room.number", read_only=True)
     floor = serializers.IntegerField(source="room.floor", read_only=True)
     branch_name = serializers.CharField(source="branch.name", read_only=True)
     occupant = serializers.SerializerMethodField()
-    monthly_rent = serializers.DecimalField(source="room.monthly_rent", max_digits=12, decimal_places=2, read_only=True)
+    monthly_rent = serializers.SerializerMethodField()
 
     class Meta:
         model = HostelBed
-        fields = ("id", "code", "status", "room", "room_number", "floor", "branch", "branch_name", "occupant", "monthly_rent")
+        fields = ("id", "code", "furnishing", "status", "room", "room_number", "floor", "branch", "branch_name", "occupant", "monthly_rent")
 
     def get_occupant(self, obj):
         stay = obj.reservations.filter(status="checked_in").select_related("customer").first()
@@ -64,20 +73,28 @@ class BedSerializer(serializers.ModelSerializer):
             return None
         return {"id": str(stay.customer_id), "name": stay.customer.full_name, "reservation": str(stay.id)}
 
+    def get_monthly_rent(self, obj):
+        return str(seat_price(obj))
+
 
 class RoomSerializer(serializers.ModelSerializer):
     beds = BedSerializer(many=True, read_only=True)
     branch_name = serializers.CharField(source="branch.name", read_only=True)
     occupied_beds = serializers.SerializerMethodField()
     available_beds = serializers.SerializerMethodField()
+    bed_count = serializers.SerializerMethodField()
+    mattress_count = serializers.SerializerMethodField()
+    bed_seats = serializers.IntegerField(required=False, write_only=True, min_value=0, max_value=30)
+    mattress_seats = serializers.IntegerField(required=False, write_only=True, min_value=0, max_value=30)
     image = serializers.CharField(required=False, allow_blank=True)
 
     class Meta:
         model = HostelRoom
         fields = (
             "id", "branch", "branch_name", "number", "floor", "room_type", "capacity",
-            "monthly_rent", "security_deposit", "attached_bathroom", "ac", "wifi",
+            "monthly_rent", "mattress_rent", "security_deposit", "attached_bathroom", "ac", "wifi",
             "facilities", "image", "status", "beds", "occupied_beds", "available_beds",
+            "bed_count", "mattress_count", "bed_seats", "mattress_seats",
         )
 
     def validate_image(self, value):
@@ -88,6 +105,12 @@ class RoomSerializer(serializers.ModelSerializer):
 
     def get_available_beds(self, obj):
         return sum(1 for bed in obj.beds.all() if bed.status == "available")
+
+    def get_bed_count(self, obj):
+        return sum(1 for bed in obj.beds.all() if bed.furnishing != "mattress")
+
+    def get_mattress_count(self, obj):
+        return sum(1 for bed in obj.beds.all() if bed.furnishing == "mattress")
 
 
 class RoomWriteSerializer(RoomSerializer):

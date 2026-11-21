@@ -214,3 +214,52 @@ class HostelWorkflowTests(APITestCase):
         self.assertEqual(by_number["102"]["available_beds"], 1)
         seated = next(bed for bed in by_number["102"]["beds"] if bed["occupant"])
         self.assertEqual(seated["occupant"]["name"], "Sara Student")
+
+    def test_owner_can_hand_over_a_branch_and_manager_can_add_seats(self):
+        karachi = self.client.post("/api/hostel/branches/", {"name": "Karachi", "code": "KHI9", "floors": 1}, format="json")
+        lahore = self.client.post("/api/hostel/branches/", {"name": "Lahore", "code": "LHR9", "floors": 1}, format="json")
+        self.assertEqual(lahore.status_code, 201, lahore.data)
+        made = self.client.post("/api/hostel/employees/", {
+            "full_name": "Branch Lead", "email": "lead@hostel.test", "password": "staff-pass-1",
+            "branch": karachi.data["id"], "role": "manager",
+        }, format="json")
+        self.assertEqual(made.status_code, 201, made.data)
+        handed = self.client.post(f"/api/hostel/branches/{lahore.data['id']}/handover/", {"employee": made.data["id"]}, format="json")
+        self.assertEqual(handed.status_code, 200, handed.data)
+        self.assertEqual(handed.data["manager_name"], "Branch Lead")
+        self.assertEqual(handed.data["manager_email"], "lead@hostel.test")
+
+        self.client.force_authenticate(User.objects.get(email="lead@hostel.test"))
+        names = [row["name"] for row in self.client.get("/api/hostel/branches/").data]
+        self.assertEqual(names, ["Lahore"])
+        self.assertEqual(self.client.get(f"/api/hostel/branches/{karachi.data['id']}/").status_code, 404)
+
+        room = self.client.post("/api/hostel/rooms/", {
+            "branch": lahore.data["id"], "number": "12", "floor": 1, "room_type": "triple",
+            "bed_seats": 2, "mattress_seats": 1, "monthly_rent": "15000", "mattress_rent": "9000",
+        }, format="json")
+        self.assertEqual(room.status_code, 201, room.data)
+        self.assertEqual(room.data["bed_count"], 2)
+        self.assertEqual(room.data["mattress_count"], 1)
+        kinds = [bed["furnishing"] for bed in room.data["beds"]]
+        self.assertEqual(kinds.count("bed"), 2)
+        self.assertEqual(kinds.count("mattress"), 1)
+        mattress = next(bed for bed in room.data["beds"] if bed["furnishing"] == "mattress")
+        self.assertEqual(mattress["monthly_rent"], "9000.00")
+
+        added = self.client.post(f"/api/hostel/rooms/{room.data['id']}/seats/", {"count": 2, "furnishing": "mattress"}, format="json")
+        self.assertEqual(added.status_code, 200, added.data)
+        self.assertEqual(added.data["bed_count"], 2)
+        self.assertEqual(added.data["mattress_count"], 3)
+        self.assertEqual(len(added.data["beds"]), 5)
+
+        self.client.force_authenticate(self.owner)
+        created = self.client.post("/api/hostel/branches/", {"name": "Islamabad", "code": "ISB9", "floors": 1}, format="json")
+        fresh = self.client.post(f"/api/hostel/branches/{created.data['id']}/handover/", {
+            "full_name": "New Manager", "email": "new-manager@hostel.test", "password": "staff-pass-1",
+        }, format="json")
+        self.assertEqual(fresh.status_code, 200, fresh.data)
+        self.client.force_authenticate(User.objects.get(email="new-manager@hostel.test"))
+        visible = [row["name"] for row in self.client.get("/api/hostel/branches/").data]
+        self.assertEqual(visible, ["Islamabad"])
+        self.assertEqual(self.client.get(f"/api/hostel/branches/{lahore.data['id']}/").status_code, 404)

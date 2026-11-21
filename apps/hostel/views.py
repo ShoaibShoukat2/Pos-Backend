@@ -1,5 +1,6 @@
 from datetime import date, timedelta
 
+from django.db import transaction
 from django.db.models import Count, Q, Sum
 from django.utils import timezone
 from rest_framework import mixins, status, viewsets
@@ -48,7 +49,9 @@ from apps.hostel.serializers import (
 )
 from apps.hostel.services import (
     accept_invite,
+    add_room_seats,
     adjust_bill,
+    apply_seat_mix,
     apply_late_fees,
     assign_permissions,
     build_report,
@@ -63,10 +66,12 @@ from apps.hostel.services import (
     extend_stay,
     generate_months,
     guard_delete_branch,
+    handover_branch,
     record_payment,
     refresh_overdue,
     require_branch,
     search_hostel,
+    set_bed_furnishing,
     set_bed_status,
     settings_for,
     store_identity_docs,
@@ -126,7 +131,7 @@ class BranchViewSet(HostelBase, viewsets.ModelViewSet):
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]
 
     def get_queryset(self):
-        qs = branch_counts(super().get_queryset())
+        qs = branch_counts(super().get_queryset()).select_related("manager")
         if self.actor["role"] != "owner":
             qs = qs.filter(pk=self.actor["branch_id"])
         return qs
@@ -143,6 +148,23 @@ class BranchViewSet(HostelBase, viewsets.ModelViewSet):
         self.require("branches.manage")
         guard_delete_branch(instance)
         instance.delete()
+
+    @action(detail=True, methods=["post"])
+    def handover(self, request, pk=None):
+        branch = self.get_object()
+        employee, token = handover_branch(
+            self.actor,
+            branch,
+            employee_id=request.data.get("employee") or None,
+            full_name=request.data.get("full_name") or "",
+            email=request.data.get("email") or "",
+            phone=request.data.get("phone") or "",
+            password=request.data.get("password") or "",
+        )
+        data = BranchSerializer(self.get_queryset().get(pk=branch.pk)).data
+        if token:
+            data["invite_path"] = f"/hostel/invite?token={token}"
+        return Response(data)
 
 
 class RoomViewSet(HostelBase, viewsets.ModelViewSet):
@@ -164,16 +186,33 @@ class RoomViewSet(HostelBase, viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         self.require("rooms.manage")
-        branch = require_branch(self.actor, serializer.validated_data["branch"])
-        room = serializer.save(business=self.request.user.business, branch=branch)
-        sync_room_beds(room)
+        with transaction.atomic():
+            branch = require_branch(self.actor, serializer.validated_data["branch"])
+            bed_seats = serializer.validated_data.pop("bed_seats", None)
+            mattress_seats = serializer.validated_data.pop("mattress_seats", None)
+            room = serializer.save(business=self.request.user.business, branch=branch)
+            apply_seat_mix(room, bed_seats, mattress_seats)
 
     def perform_update(self, serializer):
         self.require("rooms.manage")
+        serializer.validated_data.pop("bed_seats", None)
+        serializer.validated_data.pop("mattress_seats", None)
         if "branch" in serializer.validated_data:
             require_branch(self.actor, serializer.validated_data["branch"])
         room = serializer.save()
         sync_room_beds(room)
+
+    @action(detail=True, methods=["post"], url_path="seats")
+    def add_seats(self, request, pk=None):
+        room = add_room_seats(
+            self.actor,
+            self.get_object(),
+            request.data.get("count"),
+            request.data.get("furnishing") or "bed",
+            request.data.get("monthly_rent"),
+        )
+        room = self.get_queryset().get(pk=room.pk)
+        return Response(RoomSerializer(room).data)
 
     def perform_destroy(self, instance):
         self.require("rooms.manage")
@@ -223,6 +262,11 @@ class BedViewSet(HostelBase, viewsets.ModelViewSet):
     @action(detail=True, methods=["post"])
     def status(self, request, pk=None):
         bed = set_bed_status(self.actor, self.get_object(), request.data.get("status"))
+        return Response(BedSerializer(bed).data)
+
+    @action(detail=True, methods=["post"])
+    def furnishing(self, request, pk=None):
+        bed = set_bed_furnishing(self.actor, self.get_object(), request.data.get("furnishing"))
         return Response(BedSerializer(bed).data)
 
 
@@ -647,6 +691,7 @@ class EmployeeViewSet(HostelBase, viewsets.ModelViewSet):
         instance.is_deleted = True
         instance.status = HostelEmployee.Status.INACTIVE
         instance.save(update_fields=["is_deleted", "status", "updated_at"])
+        HostelBranch.objects.filter(manager=instance).update(manager=None, manager_name="")
         if instance.user_id:
             instance.user.is_active = False
             instance.user.save(update_fields=["is_active"])

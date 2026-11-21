@@ -40,6 +40,13 @@ class HostelBranch(TimeStampedModel):
     opening_date = models.DateField(null=True, blank=True)
     status = models.CharField(max_length=12, choices=Status.choices, default=Status.ACTIVE)
     image = models.TextField(blank=True)
+    manager = models.OneToOneField(
+        "hostel.HostelEmployee",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="managed_branch",
+    )
     is_deleted = models.BooleanField(default=False)
     deleted_at = models.DateTimeField(null=True, blank=True)
     objects = BusinessScopedManager()
@@ -76,6 +83,7 @@ class HostelRoom(TimeStampedModel):
     room_type = models.CharField(max_length=12, choices=RoomType.choices, default=RoomType.DOUBLE)
     capacity = models.PositiveSmallIntegerField(default=2)
     monthly_rent = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    mattress_rent = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     security_deposit = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     attached_bathroom = models.BooleanField(default=False)
     ac = models.BooleanField(default=False)
@@ -105,10 +113,15 @@ class HostelBed(TimeStampedModel):
         MAINTENANCE = "maintenance", "Maintenance"
         BLOCKED = "blocked", "Blocked"
 
+    class Furnishing(models.TextChoices):
+        BED = "bed", "Bed"
+        MATTRESS = "mattress", "Mattress"
+
     business = models.ForeignKey("businesses.Business", on_delete=models.CASCADE, related_name="hostel_beds")
     branch = models.ForeignKey(HostelBranch, on_delete=models.CASCADE, related_name="beds")
     room = models.ForeignKey(HostelRoom, on_delete=models.CASCADE, related_name="beds")
     code = models.CharField(max_length=12)
+    furnishing = models.CharField(max_length=12, choices=Furnishing.choices, default=Furnishing.BED)
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.AVAILABLE)
     objects = BusinessScopedManager()
 
