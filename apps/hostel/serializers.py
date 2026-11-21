@@ -82,14 +82,21 @@ class BedSerializer(serializers.ModelSerializer):
         if stay is None:
             return None
         customer = stay.customer
-        return {
+        view = self.context.get("view")
+        detail = getattr(view, "action", "") == "retrieve"
+        payload = {
             "id": str(customer.id),
             "name": customer.full_name,
             "phone": customer.mobile,
             "whatsapp": customer.whatsapp,
+            "email": customer.email,
             "father_name": customer.father_name,
             "cnic": customer.cnic,
             "gender": customer.gender,
+            "date_of_birth": customer.date_of_birth.isoformat() if customer.date_of_birth else None,
+            "permanent_address": customer.permanent_address,
+            "current_address": customer.current_address,
+            "emergency_contact": customer.emergency_contact,
             "guardian_name": customer.guardian_name,
             "guardian_contact": customer.guardian_contact,
             "check_in_date": stay.check_in_date.isoformat() if stay.check_in_date else None,
@@ -97,10 +104,16 @@ class BedSerializer(serializers.ModelSerializer):
             "notice_given_on": customer.notice_given_on.isoformat() if customer.notice_given_on else None,
             "notice_leave_on": customer.notice_leave_on.isoformat() if customer.notice_leave_on else None,
             "notice_note": customer.notice_note,
+            "notes": customer.notes,
             "monthly_rent": str(stay.monthly_rent or customer.monthly_rent or 0),
             "status": stay.status,
             "reservation": str(stay.id),
         }
+        if detail:
+            payload["photo"] = customer.photo
+            payload["cnic_front"] = customer.cnic_front
+            payload["cnic_back"] = customer.cnic_back
+        return payload
 
     def get_monthly_rent(self, obj):
         return str(seat_price(obj))
