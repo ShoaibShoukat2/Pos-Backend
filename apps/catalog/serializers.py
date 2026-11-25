@@ -91,7 +91,7 @@ class ProductVariantSerializer(serializers.ModelSerializer):
         if self.instance:
             qs = qs.exclude(pk=self.instance.pk)
         if qs.exists():
-            raise serializers.ValidationError("A variant with this SKU already exists.")
+            raise serializers.ValidationError("This item code is already used on another size or colour.")
         return value
 
     def create(self, validated):
@@ -265,7 +265,7 @@ class ProductSerializer(serializers.ModelSerializer):
         if self.instance:
             qs = qs.exclude(pk=self.instance.pk)
         if qs.exists():
-            raise serializers.ValidationError("A product or service with this SKU already exists.")
+            raise serializers.ValidationError("This item code is already used. Pick a different one.")
         return value
 
     def validate(self, attrs):
