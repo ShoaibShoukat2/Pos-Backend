@@ -167,6 +167,17 @@ class ProductVariant(TimeStampedModel):
         max_length=80, blank=True,
         help_text="Barcode on the box (if different from unit barcode).",
     )
+    carton_quantity = models.DecimalField(
+        max_digits=14, decimal_places=3, default=0,
+        help_text="Pieces in one carton (cotton). 0 = no carton pricing.",
+    )
+    carton_price = models.DecimalField(
+        max_digits=14, decimal_places=2, default=0,
+        help_text="Price for one full carton. 0 = no carton pricing.",
+    )
+    carton_barcode = models.CharField(max_length=80, blank=True)
+    size = models.CharField(max_length=8, blank=True)
+    garment_type = models.CharField(max_length=20, blank=True)
     is_default = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
 
@@ -184,8 +195,21 @@ class ProductVariant(TimeStampedModel):
     def __str__(self):
         return self.display_name
 
+    def retail_label(self):
+        parts = []
+        if self.size:
+            parts.append(self.size)
+        if self.garment_type == "economy":
+            parts.append("Economy")
+        elif self.garment_type == "jumbo":
+            parts.append("Jumbo")
+        return " · ".join(parts)
+
     @property
     def display_name(self):
+        label = self.retail_label()
+        if label:
+            return label
         if self.name:
             return self.name
         if self.attributes:

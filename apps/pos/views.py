@@ -52,6 +52,11 @@ def _catalog_rows(variants, levels):
                 "pack_quantity": f"{variant.pack_quantity:.3f}" if variant.pack_quantity else "0",
                 "pack_price": f"{variant.pack_price:.2f}" if variant.pack_price else "0",
                 "pack_barcode": variant.pack_barcode or "",
+                "carton_quantity": f"{variant.carton_quantity:.3f}" if variant.carton_quantity else "0",
+                "carton_price": f"{variant.carton_price:.2f}" if variant.carton_price else "0",
+                "carton_barcode": variant.carton_barcode or "",
+                "size": variant.size or "",
+                "garment_type": variant.garment_type or "",
             }
         )
     return catalog
@@ -248,13 +253,22 @@ class CatalogSearchView(APIView):
             .order_by("product__name", "name", "sku")
         )
         if q:
-            exact = qs.filter(Q(barcode__iexact=q) | Q(sku__iexact=q) | Q(product__barcode__iexact=q))
+            exact = qs.filter(
+                Q(barcode__iexact=q)
+                | Q(sku__iexact=q)
+                | Q(product__barcode__iexact=q)
+                | Q(pack_barcode__iexact=q)
+                | Q(carton_barcode__iexact=q)
+            )
             qs = exact if exact.exists() else qs.filter(
                 Q(sku__icontains=q)
                 | Q(barcode__icontains=q)
                 | Q(name__icontains=q)
                 | Q(product__name__icontains=q)
                 | Q(product__barcode__icontains=q)
+                | Q(pack_barcode__icontains=q)
+                | Q(carton_barcode__icontains=q)
+                | Q(size__iexact=q)
             )
         paginator = StandardPagination()
         page = paginator.paginate_queryset(qs, request)

@@ -64,7 +64,13 @@ def checkout_sale(*, business, user, payload: dict) -> Sale:
         variant = variants.get(str(row.get("variant")))
         if not variant:
             raise ValidationError({"lines": "An item is missing or inactive."})
-        items.append({"variant": variant, "quantity": row.get("quantity")})
+        items.append(
+            {
+                "variant": variant,
+                "quantity": row.get("quantity"),
+                "sale_unit": row.get("sale_unit") or "piece",
+            }
+        )
 
     when = _parse_when(payload.get("sold_at"))
 
@@ -155,6 +161,7 @@ def checkout_sale(*, business, user, payload: dict) -> Sale:
             promo_price=row["promo_price"],
             line_total=row["line_total"],
             promo_name=row["promo_name"],
+            sale_unit=row.get("sale_unit") or "piece",
         )
         if row["variant"].product.track_stock:
             record_sale(

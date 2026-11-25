@@ -71,6 +71,11 @@ class ProductVariantSerializer(serializers.ModelSerializer):
             "pack_quantity",
             "pack_price",
             "pack_barcode",
+            "carton_quantity",
+            "carton_price",
+            "carton_barcode",
+            "size",
+            "garment_type",
             "is_default",
             "is_active",
             "total_stock",
@@ -123,6 +128,11 @@ class VariantListSerializer(serializers.ModelSerializer):
             "pack_quantity",
             "pack_price",
             "pack_barcode",
+            "carton_quantity",
+            "carton_price",
+            "carton_barcode",
+            "size",
+            "garment_type",
             "is_default",
             "is_active",
             "total_stock",
@@ -173,6 +183,11 @@ class ProductListSerializer(serializers.ModelSerializer):
         )
         read_only_fields = ("id", "created_at", "updated_at")
 
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data.update(_retail_read(instance))
+        return data
+
 
 class ProductSerializer(serializers.ModelSerializer):
     category_name = serializers.CharField(source="category.name", read_only=True)
@@ -185,6 +200,11 @@ class ProductSerializer(serializers.ModelSerializer):
     pack_quantity = serializers.DecimalField(max_digits=14, decimal_places=3, required=False, write_only=True)
     pack_price = serializers.DecimalField(max_digits=14, decimal_places=2, required=False, write_only=True)
     pack_barcode = serializers.CharField(required=False, allow_blank=True, write_only=True)
+    carton_quantity = serializers.DecimalField(max_digits=14, decimal_places=3, required=False, write_only=True)
+    carton_price = serializers.DecimalField(max_digits=14, decimal_places=2, required=False, write_only=True)
+    carton_barcode = serializers.CharField(required=False, allow_blank=True, write_only=True)
+    size = serializers.CharField(required=False, allow_blank=True, write_only=True)
+    garment_type = serializers.CharField(required=False, allow_blank=True, write_only=True)
 
     class Meta:
         model = Product
@@ -222,6 +242,11 @@ class ProductSerializer(serializers.ModelSerializer):
             "pack_quantity",
             "pack_price",
             "pack_barcode",
+            "carton_quantity",
+            "carton_price",
+            "carton_barcode",
+            "size",
+            "garment_type",
             "created_at",
             "updated_at",
         )
@@ -271,12 +296,35 @@ class ProductSerializer(serializers.ModelSerializer):
                 attrs["unit"] = unit
         return attrs
 
+    def validate_size(self, value):
+        value = (value or "").strip().upper()
+        if value in {"N.B", "NEWBORN", "NEW BORN"}:
+            value = "NB"
+        if value and value not in {"NB", "S", "M", "L", "XL", "XXL"}:
+            raise serializers.ValidationError("Size must be NB, S, M, L, XL or XXL.")
+        return value
+
+    def validate_garment_type(self, value):
+        value = (value or "").strip().lower()
+        if value in {"eco", "economy"}:
+            return "economy"
+        if value == "jumbo":
+            return "jumbo"
+        if not value:
+            return ""
+        raise serializers.ValidationError("Type must be Economy or Jumbo.")
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data.update(_retail_read(instance))
+        return data
+
     @transaction.atomic
     def create(self, validated):
         request = self.context["request"]
         variants_data = validated.pop("variants", [])
         opening = validated.pop("opening_stock", [])
-        pack = _pop_pack(validated)
+        sell = _pop_sell(validated)
         validated.pop("business", None)
         product = Product.objects.create(business=request.user.business, **validated)
         if product.has_variants:
@@ -308,27 +356,27 @@ class ProductSerializer(serializers.ModelSerializer):
                 min_stock=product.min_stock,
                 is_default=True,
             )
-            _apply_pack(variant, pack)
+            _apply_sell(variant, sell)
             _apply_opening(variant, opening, request.user)
         return product
 
     def update(self, instance, validated):
         validated.pop("variants", None)
         validated.pop("opening_stock", None)
-        pack = _pop_pack(validated) if _pack_sent(self.initial_data) else None
+        sell = _pop_sell(validated) if _sell_sent(self.initial_data) else None
         product = super().update(instance, validated)
         if not product.has_variants:
             default = product.variants.filter(is_default=True).first() or product.variants.first()
             if default:
-                default.name = product.name
                 default.sku = product.sku
                 default.barcode = product.barcode
                 default.cost_price = product.cost_price
                 default.selling_price = product.selling_price
                 default.min_stock = product.min_stock
                 default.is_active = product.is_active
-                if pack:
-                    _apply_pack(default, pack, save=False)
+                if sell:
+                    _apply_sell(default, sell, save=False)
+                default.name = default.retail_label() or product.name
                 default.save()
         return product
 
@@ -340,29 +388,91 @@ def _default_unit(business):
     )
 
 
-def _pop_pack(validated):
+SELL_KEYS = (
+    "pack_quantity",
+    "pack_price",
+    "pack_barcode",
+    "carton_quantity",
+    "carton_price",
+    "carton_barcode",
+    "size",
+    "garment_type",
+)
+
+
+def _pop_sell(validated):
+    return {key: validated.pop(key, None) for key in SELL_KEYS}
+
+
+def _sell_sent(data):
+    return any(key in data for key in SELL_KEYS)
+
+
+def _apply_sell(variant, sell, save=True):
+    if not sell:
+        return
+    decimals = {"pack_quantity", "pack_price", "carton_quantity", "carton_price"}
+    texts = {"pack_barcode", "carton_barcode", "size", "garment_type"}
+    fields = []
+    for key in decimals:
+        if sell.get(key) is not None:
+            setattr(variant, key, sell[key] or 0)
+            fields.append(key)
+    for key in texts:
+        if sell.get(key) is not None:
+            setattr(variant, key, sell[key] or "")
+            fields.append(key)
+    label = variant.retail_label()
+    if label or any(sell.get(key) is not None for key in ("size", "garment_type")):
+        variant.name = label or variant.product.name
+        attrs = dict(variant.attributes or {})
+        if variant.size:
+            attrs["Size"] = variant.size
+        else:
+            attrs.pop("Size", None)
+        if variant.garment_type == "economy":
+            attrs["Type"] = "Economy"
+        elif variant.garment_type == "jumbo":
+            attrs["Type"] = "Jumbo"
+        else:
+            attrs.pop("Type", None)
+        variant.attributes = attrs
+        fields.extend(["name", "attributes"])
+    if save and fields:
+        variant.save(update_fields=list(dict.fromkeys(fields)))
+
+
+def _retail_read(product):
+    variant = _default_variant(product)
+    if not variant:
+        return {
+            "size": "",
+            "garment_type": "",
+            "pack_quantity": "0.000",
+            "pack_price": "0.00",
+            "pack_barcode": "",
+            "carton_quantity": "0.000",
+            "carton_price": "0.00",
+            "carton_barcode": "",
+        }
     return {
-        "pack_quantity": validated.pop("pack_quantity", None),
-        "pack_price": validated.pop("pack_price", None),
-        "pack_barcode": validated.pop("pack_barcode", None),
+        "size": variant.size or "",
+        "garment_type": variant.garment_type or "",
+        "pack_quantity": f"{variant.pack_quantity:.3f}",
+        "pack_price": f"{variant.pack_price:.2f}",
+        "pack_barcode": variant.pack_barcode or "",
+        "carton_quantity": f"{variant.carton_quantity:.3f}",
+        "carton_price": f"{variant.carton_price:.2f}",
+        "carton_barcode": variant.carton_barcode or "",
     }
 
 
-def _pack_sent(data):
-    return any(key in data for key in ("pack_quantity", "pack_price", "pack_barcode"))
-
-
-def _apply_pack(variant, pack, save=True):
-    if not pack:
-        return
-    if pack["pack_quantity"] is not None:
-        variant.pack_quantity = pack["pack_quantity"] or 0
-    if pack["pack_price"] is not None:
-        variant.pack_price = pack["pack_price"] or 0
-    if pack["pack_barcode"] is not None:
-        variant.pack_barcode = pack["pack_barcode"] or ""
-    if save:
-        variant.save(update_fields=["pack_quantity", "pack_price", "pack_barcode"])
+def _default_variant(product):
+    variants = list(product.variants.all())
+    for row in variants:
+        if row.is_default:
+            return row
+    return variants[0] if variants else None
 
 
 def _next_product_sku(business):

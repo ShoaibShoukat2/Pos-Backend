@@ -4,7 +4,7 @@ from datetime import timedelta
 
 from django.utils import timezone
 from django.db import transaction
-from django.db.models import Count, DecimalField, F, Prefetch, Q, Sum, Value
+from django.db.models import Count, DecimalField, Exists, F, OuterRef, Prefetch, Q, Sum, Value
 from django.db.models.deletion import ProtectedError
 from django.db.models.functions import Coalesce
 from rest_framework import viewsets
@@ -120,6 +120,12 @@ class ProductViewSet(BusinessQuerysetMixin, viewsets.ModelViewSet):
         if self.action == "list" and "item_kind" not in self.request.query_params:
             qs = qs.filter(item_kind=Product.ItemKind.PRODUCT)
         if self.action == "list":
+            qs = qs.prefetch_related(
+                Prefetch(
+                    "variants",
+                    queryset=ProductVariant.objects.order_by("-is_default", "name"),
+                )
+            )
             flag = self.request.query_params.get
             if flag("low_stock") in {"1", "true", "yes"}:
                 qs = qs.filter(total_stock__lt=F("min_stock"))
@@ -128,6 +134,20 @@ class ProductViewSet(BusinessQuerysetMixin, viewsets.ModelViewSet):
             if flag("expiring") in {"1", "true", "yes"}:
                 horizon = timezone.localdate() + timedelta(days=90)
                 qs = qs.filter(expiry_date__isnull=False, expiry_date__lte=horizon)
+            size = (flag("size") or "").strip().upper()
+            garment = (flag("garment_type") or "").strip().lower()
+            if size:
+                qs = qs.filter(
+                    Exists(ProductVariant.objects.filter(product_id=OuterRef("pk"), size=size, is_active=True))
+                )
+            if garment:
+                qs = qs.filter(
+                    Exists(
+                        ProductVariant.objects.filter(
+                            product_id=OuterRef("pk"), garment_type=garment, is_active=True
+                        )
+                    )
+                )
         return qs
 
     def perform_destroy(self, instance):
@@ -184,7 +204,9 @@ class VariantViewSet(BusinessQuerysetMixin, viewsets.ModelViewSet):
         code = (request.query_params.get("barcode") or request.query_params.get("sku") or "").strip()
         if not code:
             return Response({"detail": "Provide barcode or sku."}, status=400)
-        variant = self.get_queryset().filter(barcode__iexact=code).first()
+        variant = self.get_queryset().filter(
+            Q(barcode__iexact=code) | Q(pack_barcode__iexact=code) | Q(carton_barcode__iexact=code)
+        ).first()
         if not variant:
             variant = self.get_queryset().filter(sku__iexact=code).first()
         if not variant:

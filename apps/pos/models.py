@@ -102,6 +102,7 @@ class SaleLine(TimeStampedModel):
     promo_price = models.DecimalField(max_digits=14, decimal_places=2)
     line_total = models.DecimalField(max_digits=14, decimal_places=2)
     promo_name = models.CharField(max_length=160, blank=True)
+    sale_unit = models.CharField(max_length=12, default="piece")
 
     objects = BusinessScopedManager()
 

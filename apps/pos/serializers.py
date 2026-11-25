@@ -7,7 +7,7 @@ from apps.pos.returns import process_sale_return
 
 class SaleLineSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source="variant.product.name", read_only=True)
-    variant_name = serializers.CharField(source="variant.display_name", read_only=True)
+    variant_name = serializers.SerializerMethodField()
     sku = serializers.CharField(source="variant.sku", read_only=True)
     returnable_qty = serializers.SerializerMethodField()
 
@@ -28,7 +28,19 @@ class SaleLineSerializer(serializers.ModelSerializer):
             "promo_price",
             "line_total",
             "promo_name",
+            "sale_unit",
         )
+
+    def get_variant_name(self, obj):
+        base = obj.variant.display_name or ""
+        product_name = obj.variant.product.name
+        unit = (obj.sale_unit or "piece").lower()
+        tag = {"pack": "Pack", "carton": "Carton"}.get(unit, "")
+        if base == product_name:
+            base = ""
+        if tag and base:
+            return f"{base} · {tag}"
+        return tag or base
 
     def get_returnable_qty(self, obj):
         remaining = obj.quantity - obj.returned_qty
@@ -89,6 +101,7 @@ class SaleSerializer(serializers.ModelSerializer):
 class CheckoutLineSerializer(serializers.Serializer):
     variant = serializers.UUIDField()
     quantity = serializers.DecimalField(max_digits=14, decimal_places=3)
+    sale_unit = serializers.ChoiceField(choices=["piece", "pack", "carton"], required=False, default="piece")
 
 
 class CheckoutPaymentSerializer(serializers.Serializer):
