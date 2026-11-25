@@ -51,6 +51,18 @@ def platform_overview(period: str = "month"):
     )
 
     recent = businesses.order_by("-created_at")[:8]
+    soon = today + timedelta(days=14)
+    ending_qs = businesses.filter(
+        live,
+        subscription_ends_on__isnull=False,
+        subscription_ends_on__gte=today,
+        subscription_ends_on__lte=soon,
+    )
+    by_type = (
+        businesses.values("business_type")
+        .annotate(total=Count("id"), active=Count("id", filter=live))
+        .order_by("-total", "business_type")
+    )
     return {
         "period": period,
         "businesses": {
@@ -69,6 +81,22 @@ def platform_overview(period: str = "month"):
         "branches": {"total": Branch.objects.count()},
         "products": {"total": Product.objects.count()},
         "customers": {"total": Customer.objects.count()},
+        "expiring_soon": ending_qs.count(),
+        "by_type": [
+            {"business_type": row["business_type"], "total": row["total"], "active": row["active"]}
+            for row in by_type
+        ],
+        "ending_soon": [
+            {
+                "id": str(row.id),
+                "name": row.name,
+                "business_type": row.business_type,
+                "city": row.city,
+                "subscription_ends_on": row.subscription_ends_on.isoformat(),
+                "days_left": (row.subscription_ends_on - today).days,
+            }
+            for row in ending_qs.order_by("subscription_ends_on")[:6]
+        ],
         "sales": {
             "count": sales.count(),
             "revenue": money(sales.aggregate(t=Coalesce(Sum("total"), Decimal("0"), output_field=MONEY))["t"]),
