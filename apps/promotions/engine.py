@@ -55,7 +55,7 @@ def price_lines(business, items, when=None):
         qty = Decimal(item["quantity"])
         if qty <= ZERO:
             raise ValidationError("Line quantity must be greater than zero.")
-        list_price, sale_unit = _bundle_unit_price(variant, qty, item.get("sale_unit"))
+        list_price, sale_unit, exact_total = _bundle_unit_price(variant, qty, item.get("sale_unit"))
         unit = list_price
         applied = ""
         free_qty = ZERO
@@ -73,7 +73,11 @@ def price_lines(business, items, when=None):
                 unit = next_unit
                 applied = promo.name
         paid_qty = qty - free_qty
-        line_total = money(paid_qty * unit)
+        if exact_total is not None and qty > ZERO and list_price > ZERO:
+            base = exact_total if unit == list_price else money(exact_total * (unit / list_price))
+            line_total = money(base * (paid_qty / qty))
+        else:
+            line_total = money(paid_qty * unit)
         priced.append(
             {
                 "variant": variant,
@@ -94,7 +98,7 @@ def _bundle_unit_price(variant, qty, sale_unit):
     if sale_unit not in {"piece", "pack", "carton"}:
         sale_unit = "piece"
     if sale_unit == "piece":
-        return money(variant.selling_price), sale_unit
+        return money(variant.selling_price), sale_unit, None
     if sale_unit == "pack":
         bundle_qty = Decimal(variant.pack_quantity or 0)
         bundle_price = Decimal(variant.pack_price or 0)
@@ -107,4 +111,5 @@ def _bundle_unit_price(variant, qty, sale_unit):
         raise ValidationError({"lines": f"This item has no {label} price."})
     if qty % bundle_qty != 0:
         raise ValidationError({"lines": f"Sell whole {label}s only."})
-    return money(bundle_price / bundle_qty), sale_unit
+    exact = money((qty / bundle_qty) * bundle_price)
+    return money(exact / qty), sale_unit, exact
